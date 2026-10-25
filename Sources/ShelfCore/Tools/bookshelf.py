@@ -27,6 +27,12 @@ def main():
                    (SELECT group_concat(a.name, ' · ')
                       FROM books_authors_link l JOIN authors a ON a.id=l.author
                      WHERE l.book=b.id) AS authors,
+                   (SELECT group_concat(s.name, ' · ')
+                      FROM books_series_link l JOIN series s ON s.id=l.series
+                     WHERE l.book=b.id) AS series,
+                   (SELECT group_concat(t.name, ' · ')
+                      FROM books_tags_link l JOIN tags t ON t.id=l.tag
+                     WHERE l.book=b.id) AS tags,
                    (SELECT group_concat(d.format, ',') FROM data d WHERE d.book=b.id) AS formats
               FROM books b
               LEFT JOIN custom_column_1 p ON p.book=b.id
@@ -55,6 +61,8 @@ def main():
             'id': row['id'],
             'title': row['title'],
             'authors': row['authors'] or 'Unknown author',
+            'series': row['series'] or '',
+            'tags': row['tags'] or '',
             'progress': progress,
             'formats': row['formats'] or '',
             'added': row['timestamp'] or '',

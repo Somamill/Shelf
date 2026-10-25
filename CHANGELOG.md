@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8
+
+- Adds persistent cover-grid and compact-list library layouts, natural title/author sorting, progress sorting, and search across title, author, series, and tags.
+- Extends automatic reader matching with exact embedded identifiers such as valid ISBN-10 and ISBN-13 values before title similarity; ambiguous matches remain unlinked.
+- Refreshes navigation with consistent vector page icons, responsive glass surfaces, reduced-transparency and reduced-motion support, and system dark mode.
+- Documents Readest’s metadata and file-content settings for reliable KOReader-to-Calibre matching.
+
+
 ## 0.1.7
 
 - Adds a paste-ready Readwise access-token field on Connections, validates tokens against Readwise before saving them to Keychain, and links directly to the token page.
