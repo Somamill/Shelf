@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.6
+
+- Moves Readwise Reader key setup and sync controls to Connections, with a visible connection state and disconnect action.
+- Retries Readest unmatched positions when it sends title metadata and avoids automatically linking weak or ambiguous title matches.
+- Preserves old low-confidence matches as suggestions instead of silently treating them as confirmed links.
+- Documents the Readest metadata setting that enables automatic matching for existing and future progress records.
+- Adds automatic suggestions for close title and author matches.
+
 ## 0.1.5
 
 - Adds a Readwise Reader sync action for matching EPUB progress and highlights with the local Calibre library and KOReader sync services.
