@@ -35,6 +35,14 @@ private final class DroppableWebView:WKWebView {
     }
 }
 
+/// Lets EPUB text selection and page interaction pass through the transparent reader chrome.
+private final class ReaderOverlayView:NSView {
+    override func hitTest(_ point:NSPoint)->NSView? {
+        let hit=super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+}
+
 /// Machine-specific paths and service addresses live outside the public source tree.
 private struct ShelfConfiguration {
     private var values: [String: Any]
@@ -572,7 +580,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             (function(){
               window.readerBook=\(source);
               const style=document.createElement('style');
-              style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:54px 280px;column-width:790px!important;column-gap:560px!important;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
+              style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:88px 280px 104px;column-width:790px!important;column-gap:560px!important;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
               let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
               window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd']};const palette=themes[p.theme]||themes.paper;const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
               let titleKey=(window.readerBook.title||'').trim().toLocaleLowerCase();
@@ -608,11 +616,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         web.navigationDelegate=self
         let container=NSView(frame:.zero)
         let toolbar=makeReaderToolbar(title:title,author:readerData["authors"] as? String ?? "")
-        container.addSubview(toolbar); container.addSubview(web)
+        container.addSubview(web); container.addSubview(toolbar)
         for view in [toolbar,web] { view.translatesAutoresizingMaskIntoConstraints=false }
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo:container.topAnchor),toolbar.leadingAnchor.constraint(equalTo:container.leadingAnchor),toolbar.trailingAnchor.constraint(equalTo:container.trailingAnchor),toolbar.heightAnchor.constraint(equalToConstant:88),
-            web.topAnchor.constraint(equalTo:toolbar.bottomAnchor),web.leadingAnchor.constraint(equalTo:container.leadingAnchor),web.trailingAnchor.constraint(equalTo:container.trailingAnchor),web.bottomAnchor.constraint(equalTo:container.bottomAnchor)
+            web.topAnchor.constraint(equalTo:container.topAnchor),web.leadingAnchor.constraint(equalTo:container.leadingAnchor),web.trailingAnchor.constraint(equalTo:container.trailingAnchor),web.bottomAnchor.constraint(equalTo:container.bottomAnchor),
+            toolbar.topAnchor.constraint(equalTo:container.topAnchor,constant:14),toolbar.leadingAnchor.constraint(equalTo:container.leadingAnchor,constant:18),toolbar.trailingAnchor.constraint(equalTo:container.trailingAnchor,constant:-18),toolbar.bottomAnchor.constraint(equalTo:container.bottomAnchor,constant:-14)
         ])
         if dashboardContentView == nil { dashboardContentView=window.contentView }
         readerContentView=container; readerWebView=web; activeReader=readerData; readerTempDirectory=workDirectory
@@ -626,35 +634,41 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func makeReaderToolbar(title:String,author:String)->NSView {
-        let toolbar=NSView(frame:.zero)
-        toolbar.wantsLayer=true
-        toolbar.layer?.backgroundColor=NSColor.windowBackgroundColor.cgColor
+        let toolbar=ReaderOverlayView(frame:.zero)
         let back=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Back to library")!,target:self,action:#selector(closeReader))
-        back.isBordered=false; back.toolTip="Back to library"; back.setContentHuggingPriority(.required,for:.horizontal)
+        back.isBordered=false; back.toolTip="Back to library"; back.setContentHuggingPriority(.required,for:.horizontal); back.imagePosition = .imageLeading
         let titleLabel=NSTextField(labelWithString:title)
         titleLabel.font = .systemFont(ofSize:13,weight:.semibold); titleLabel.lineBreakMode = .byTruncatingTail
         let authorLabel=NSTextField(labelWithString:author.isEmpty ? "Now reading" : author)
         authorLabel.font = .systemFont(ofSize:11); authorLabel.textColor = .secondaryLabelColor; authorLabel.lineBreakMode = .byTruncatingTail
         let titleStack=NSStackView(views:[titleLabel,authorLabel]); titleStack.orientation = .vertical; titleStack.alignment = .leading; titleStack.distribution = .fillEqually; titleStack.spacing=0
         titleStack.setContentHuggingPriority(.defaultLow,for:.horizontal); titleStack.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
-        let chapter=NSPopUpButton(frame:.zero,pullsDown:false); chapter.addItem(withTitle:"Contents"); chapter.target=self; chapter.action=#selector(readerSelectChapter(_:)); chapter.cell?.lineBreakMode = .byTruncatingTail; chapter.widthAnchor.constraint(equalToConstant:190).isActive=true; chapter.controlSize = .small; readerChapterMenu=chapter
-        let highlight=NSButton(title:"Highlight",target:self,action:#selector(readerHighlight)); highlight.bezelStyle = .rounded; highlight.controlSize = .small; highlight.toolTip="Save the selected passage"; readerHighlightButton=highlight
-        let appearance=NSButton(title:"Aa",target:self,action:#selector(showReaderAppearance(_:))); appearance.bezelStyle = .rounded; appearance.controlSize = .small; appearance.font = .systemFont(ofSize:13,weight:.medium); appearance.toolTip="Reading appearance"
-        let top=NSStackView(views:[back,titleStack,chapter,highlight,appearance]); top.orientation = .horizontal; top.alignment = .centerY; top.distribution = .fill; top.spacing=14; top.translatesAutoresizingMaskIntoConstraints=false
+        let chapter=NSPopUpButton(frame:.zero,pullsDown:false); chapter.addItem(withTitle:"Contents"); chapter.target=self; chapter.action=#selector(readerSelectChapter(_:)); chapter.cell?.lineBreakMode = .byTruncatingTail; chapter.widthAnchor.constraint(equalToConstant:160).isActive=true; chapter.controlSize = .small; readerChapterMenu=chapter
+        let top=NSStackView(views:[back,titleStack,chapter]); top.orientation = .horizontal; top.alignment = .centerY; top.distribution = .fill; top.spacing=12; top.translatesAutoresizingMaskIntoConstraints=false
+        titleStack.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
 
         let previous=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Previous page")!,target:self,action:#selector(readerPreviousPage))
         let next=NSButton(image:NSImage(systemSymbolName:"chevron.right",accessibilityDescription:"Next page")!,target:self,action:#selector(readerNextPage))
-        [previous,next].forEach { $0.isBordered=false; $0.controlSize = .small }
+        [previous,next].forEach { $0.isBordered=false; $0.controlSize = .regular; $0.wantsLayer=true; $0.layer?.cornerRadius=12 }
         let slider=NSSlider(value:0,minValue:0,maxValue:1,target:self,action:#selector(readerProgressChanged(_:))); slider.isContinuous=false; slider.setContentHuggingPriority(.defaultLow,for:.horizontal); readerProgressSlider=slider
         let pages=NSTextField(labelWithString:"1 / 1"); pages.alignment = .center; pages.textColor = .secondaryLabelColor; pages.font = .monospacedDigitSystemFont(ofSize:11,weight:.regular); pages.widthAnchor.constraint(equalToConstant:62).isActive=true; readerPageLabel=pages
         let progress=NSTextField(labelWithString:"0%"); progress.alignment = .right; progress.textColor = .secondaryLabelColor; progress.font = .monospacedDigitSystemFont(ofSize:11,weight:.regular); progress.widthAnchor.constraint(equalToConstant:38).isActive=true; readerProgressLabel=progress
-        let bottom=NSStackView(views:[previous,slider,pages,next,progress]); bottom.orientation = .horizontal; bottom.alignment = .centerY; bottom.distribution = .fill; bottom.spacing=10; bottom.translatesAutoresizingMaskIntoConstraints=false
-        let divider=NSBox(); divider.boxType = .separator; divider.translatesAutoresizingMaskIntoConstraints=false
-        toolbar.addSubview(top); toolbar.addSubview(bottom); toolbar.addSubview(divider)
+        let highlight=NSButton(title:"Highlight",image:NSImage(systemSymbolName:"highlighter",accessibilityDescription:"Highlight selection")!,target:self,action:#selector(readerHighlight)); highlight.bezelStyle = .rounded; highlight.controlSize = .regular; highlight.imagePosition = .imageLeading; highlight.toolTip="Save the selected passage"; readerHighlightButton=highlight
+        let appearance=NSButton(title:"Text",image:NSImage(systemSymbolName:"textformat.size",accessibilityDescription:"Reading appearance")!,target:self,action:#selector(showReaderAppearance(_:))); appearance.bezelStyle = .rounded; appearance.controlSize = .regular; appearance.imagePosition = .imageLeading; appearance.toolTip="Reading appearance"
+        let bottom=NSStackView(views:[previous,slider,pages,next,chapter,highlight,appearance]); bottom.orientation = .horizontal; bottom.alignment = .centerY; bottom.distribution = .fill; bottom.spacing=11; bottom.translatesAutoresizingMaskIntoConstraints=false
+        bottom.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        let dock=NSVisualEffectView(frame:.zero); dock.translatesAutoresizingMaskIntoConstraints=false; dock.material = .hudWindow; dock.blendingMode = .withinWindow; dock.state = .active
+        dock.wantsLayer=true; dock.layer?.cornerRadius=20; dock.layer?.masksToBounds=true; dock.layer?.borderWidth=1; dock.layer?.borderColor=NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+        dock.addSubview(bottom)
+        let titleCapsule=NSVisualEffectView(frame:.zero); titleCapsule.translatesAutoresizingMaskIntoConstraints=false; titleCapsule.material = .hudWindow; titleCapsule.blendingMode = .withinWindow; titleCapsule.state = .active
+        titleCapsule.wantsLayer=true; titleCapsule.layer?.cornerRadius=17; titleCapsule.layer?.masksToBounds=true; titleCapsule.layer?.borderWidth=1; titleCapsule.layer?.borderColor=NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+        toolbar.addSubview(titleCapsule); toolbar.addSubview(dock); titleCapsule.addSubview(top)
         NSLayoutConstraint.activate([
-            top.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:24),top.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor,constant:-24),top.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:9),top.heightAnchor.constraint(equalToConstant:32),
-            divider.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor),divider.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor),divider.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:48),
-            bottom.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:24),bottom.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor,constant:-24),bottom.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:56),bottom.heightAnchor.constraint(equalToConstant:20)
+            titleCapsule.topAnchor.constraint(equalTo:toolbar.topAnchor),titleCapsule.centerXAnchor.constraint(equalTo:toolbar.centerXAnchor),titleCapsule.widthAnchor.constraint(lessThanOrEqualToConstant:1040),titleCapsule.leadingAnchor.constraint(greaterThanOrEqualTo:toolbar.leadingAnchor),titleCapsule.trailingAnchor.constraint(lessThanOrEqualTo:toolbar.trailingAnchor),titleCapsule.heightAnchor.constraint(equalToConstant:52),
+            top.leadingAnchor.constraint(equalTo:titleCapsule.leadingAnchor,constant:14),top.trailingAnchor.constraint(equalTo:titleCapsule.trailingAnchor,constant:-14),top.centerYAnchor.constraint(equalTo:titleCapsule.centerYAnchor),top.heightAnchor.constraint(equalToConstant:34),
+            dock.centerXAnchor.constraint(equalTo:toolbar.centerXAnchor),dock.bottomAnchor.constraint(equalTo:toolbar.bottomAnchor,constant:-22),dock.widthAnchor.constraint(lessThanOrEqualToConstant:900),dock.leadingAnchor.constraint(greaterThanOrEqualTo:toolbar.leadingAnchor),dock.trailingAnchor.constraint(lessThanOrEqualTo:toolbar.trailingAnchor),dock.heightAnchor.constraint(equalToConstant:58),
+            bottom.leadingAnchor.constraint(equalTo:dock.leadingAnchor,constant:13),bottom.trailingAnchor.constraint(equalTo:dock.trailingAnchor,constant:-13),bottom.centerYAnchor.constraint(equalTo:dock.centerYAnchor),bottom.heightAnchor.constraint(equalToConstant:38),
+            dock.bottomAnchor.constraint(greaterThanOrEqualTo:toolbar.bottomAnchor,constant:-80)
         ])
         return toolbar
     }
@@ -668,12 +682,13 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let minus=NSButton(title:"−",target:self,action:#selector(readerDecreaseText)); minus.bezelStyle = .rounded; minus.controlSize = .small
         let plus=NSButton(title:"+",target:self,action:#selector(readerIncreaseText)); plus.bezelStyle = .rounded; plus.controlSize = .small
         let sizeControls=NSStackView(views:[minus,size,plus]); sizeControls.orientation = .horizontal; sizeControls.alignment = .centerY; sizeControls.spacing=6
-        func row(_ title:String,_ control:NSView)->NSStackView {
-            let label=NSTextField(labelWithString:title); label.font = .systemFont(ofSize:11); label.textColor = .secondaryLabelColor; label.widthAnchor.constraint(equalToConstant:86).isActive=true
-            let result=NSStackView(views:[label,control]); result.orientation = .horizontal; result.alignment = .centerY; result.spacing=8; return result
+        func row(_ title:String,_ symbol:String,_ control:NSView)->NSStackView {
+            let icon=NSImageView(image:NSImage(systemSymbolName:symbol,accessibilityDescription:title) ?? NSImage()); icon.contentTintColor = .secondaryLabelColor; icon.imageScaling = .scaleProportionallyDown; icon.widthAnchor.constraint(equalToConstant:15).isActive=true
+            let label=NSTextField(labelWithString:title); label.font = .systemFont(ofSize:11); label.textColor = .secondaryLabelColor; label.widthAnchor.constraint(equalToConstant:78).isActive=true
+            let result=NSStackView(views:[icon,label,control]); result.orientation = .horizontal; result.alignment = .centerY; result.spacing=7; return result
         }
         let heading=NSTextField(labelWithString:"Reading appearance"); heading.font = .systemFont(ofSize:13,weight:.semibold)
-        let stack=NSStackView(views:[heading,row("Typeface",font),row("Text size",sizeControls),row("Line spacing",spacing),row("Page color",theme)])
+        let stack=NSStackView(views:[heading,row("Typeface","textformat",font),row("Text size","textformat.size",sizeControls),row("Line spacing","text.alignleft",spacing),row("Page color","circle.lefthalf.filled",theme)])
         stack.orientation = .vertical; stack.alignment = .leading; stack.distribution = .fill; stack.spacing=12; stack.translatesAutoresizingMaskIntoConstraints=false
         let content=NSView(frame:NSRect(x:0,y:0,width:294,height:212)); content.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:content.leadingAnchor,constant:18),stack.trailingAnchor.constraint(equalTo:content.trailingAnchor,constant:-18),stack.topAnchor.constraint(equalTo:content.topAnchor,constant:16),stack.bottomAnchor.constraint(equalTo:content.bottomAnchor,constant:-16)])
