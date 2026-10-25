@@ -141,7 +141,7 @@ def crosspoint_document_metadata():
         return {}
 
 def automatic_book_match(title, author, identities, filename=""):
-    """Always select the strongest candidate when any usable book identity exists."""
+    """Return a ranked suggestion only when identity evidence is meaningful."""
     query_values = []
     for value in (title, filename):
         value = str(value or "").strip()
@@ -187,7 +187,9 @@ def automatic_book_match(title, author, identities, filename=""):
     confidence = max(0.0, min(1.0, best_score))
     if margin < 0.035:
         confidence = min(confidence, 0.62)
-        reason = "Best candidate among similarly scored titles"
+        reason = "Ambiguous between similar Calibre titles"
+    if confidence < 0.60:
+        return None
     return {"book_id": best["id"], "confidence": round(confidence, 4), "reason": reason}
 
 def redis_book_metadata(key):
@@ -384,6 +386,7 @@ def main():
         # Additional device file hashes can identify another edition of a
         # Calibre title. Validate and preserve the map on every bridge pass.
         valid_aliases = {}
+        saved_suggestions = {}
         for digest, value in aliases.items():
             if not isinstance(digest, str) or len(digest) != 32 or any(c not in "0123456789abcdef" for c in digest.lower()):
                 continue
@@ -392,6 +395,14 @@ def main():
             except (TypeError, ValueError):
                 continue
             if alias_book_id in book_ids:
+                if isinstance(value, dict) and value.get("automatic"):
+                    try:
+                        confidence = float(value.get("confidence", 0))
+                    except (TypeError, ValueError):
+                        confidence = 0
+                    if confidence < 0.82:
+                        saved_suggestions[digest.lower()] = value
+                        continue
                 valid_aliases[digest.lower()] = value
                 mapping[digest.lower()] = alias_book_id
         aliases = valid_aliases
@@ -434,6 +445,11 @@ def main():
             found += 1
 
             book_id = mapping.get(digest)
+            old_suggestion = saved_suggestions.get(digest.lower())
+            suggestion = None
+            title = ""
+            author = ""
+            filename = ""
 
             if book_id is None:
                 metadata = redis_book_metadata(key)
@@ -441,11 +457,14 @@ def main():
                 for field in ("title", "author", "authors", "filename"):
                     if not metadata.get(field) and stored.get(field):
                         metadata[field] = stored[field]
-                title = str(metadata.get("title") or "").strip()
-                author = str(metadata.get("author") or metadata.get("authors") or "").strip()
+                title = str(metadata.get("title") or (old_suggestion or {}).get("source_title") or "").strip()
+                author = str(metadata.get("author") or metadata.get("authors") or (old_suggestion or {}).get("source_author") or "").strip()
+                filename = str(metadata.get("filename") or stored.get("filename") or (old_suggestion or {}).get("source_filename") or "").strip()
+                if old_suggestion:
+                    suggestion = {"book_id": int(old_suggestion["book_id"]), "confidence": float(old_suggestion.get("confidence", 0))}
                 if title or metadata.get("filename"):
                     candidate = automatic_book_match(title, author, identities, metadata.get("filename"))
-                    candidate_id = candidate.get("book_id") if candidate else None
+                    candidate_id = candidate.get("book_id") if candidate and candidate.get("confidence", 0) >= 0.82 else None
                     if candidate_id in book_ids:
                         book_id = candidate_id
                         mapping[digest.lower()] = candidate_id
@@ -459,6 +478,9 @@ def main():
                             "source_filename": str(metadata.get("filename") or ""),
                         }
                         log(f"AUTO-MATCHED confidence={candidate['confidence']:.2f} md5={digest} book={candidate_id} title={title[:100]}")
+                    elif candidate and candidate.get("book_id") in book_ids:
+                        suggestion = candidate
+                        log(f"MATCH-SUGGESTED confidence={candidate['confidence']:.2f} md5={digest} book={candidate['book_id']} title={title[:100]}")
 
             if book_id is None:
                 log(f"UNMATCHED md5={digest} percent={percentage} device={device}")
@@ -473,9 +495,11 @@ def main():
                         item["title"] = title
                     if author:
                         item["author"] = author
-                    filename = str(metadata.get("filename") or stored.get("filename") or "").strip()
                     if filename:
                         item["filename"] = os.path.basename(filename)
+                    if suggestion:
+                        item["suggestedBookId"] = suggestion["book_id"]
+                        item["suggestedConfidence"] = suggestion["confidence"]
                     unmatched.append(item)
                 except (TypeError, ValueError):
                     pass

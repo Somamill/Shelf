@@ -187,6 +187,15 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
+    @discardableResult
+    private func deleteKeychainCredential(_ key: String) -> Bool {
+        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                       kSecAttrService as String: "app.shelf.dashboard",
+                                       kSecAttrAccount as String: key]
+        let status = SecItemDelete(identity as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
     static func main() {
         let app = NSApplication.shared
         let delegate = DashboardApp()
@@ -299,6 +308,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "updateDashboard": confirmUpdateDashboard()
         case "sendBooxSettings": sendBooxSettings()
         case "openCrossPointSettings": openCrossPointSettings()
+        case "connectReadwiseReader": connectReadwiseReader()
+        case "disconnectReadwiseReader": disconnectReadwiseReader()
         case "syncReadwiseReader": syncReadwiseReader()
         case "openBookPlayer": if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") { NSWorkspace.shared.open(url) }
         case "loadBooks": loadBooks()
@@ -853,6 +864,32 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
+    private func connectReadwiseReader() {
+        let alert=NSAlert()
+        alert.messageText="Connect Readwise Reader"
+        alert.informativeText="Paste your Readwise access token. Shelf stores it in macOS Keychain and uses it only for Reader sync and highlights."
+        let field=NSSecureTextField(frame:NSRect(x:0,y:0,width:310,height:24))
+        field.placeholderString="Readwise access token"
+        alert.accessoryView=field
+        alert.addButton(withTitle:"Save connection")
+        alert.addButton(withTitle:"Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let token=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !token.isEmpty,saveKeychainCredential("readwise-reader-token",value:token) else {
+            notify("Could not save the Readwise token to macOS Keychain."); return
+        }
+        notify("Readwise Reader connected. Choose Sync now to import progress and highlights.")
+        refresh()
+    }
+
+    private func disconnectReadwiseReader() {
+        guard deleteKeychainCredential("readwise-reader-token") else {
+            notify("Could not remove the Readwise connection from macOS Keychain."); return
+        }
+        notify("Readwise Reader disconnected. Saved local highlights remain in Shelf.")
+        refresh()
+    }
+
     private func syncReadwiseReader() {
         let token:String
         if let saved=keychainCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
@@ -1261,7 +1298,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let shared=(md5(pass) == (plugin["progress_sync_password"] as? String ?? "") && md5(pass) == redis)
         let readerOPDS=service("readerOpds",fallback:"http://\(ip):8080/opds")
         let readerSync=service("readerSync",fallback:"http://\(ip):17200")
-        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"updates":updates,"sharedPasswordAligned":shared,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
+        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(keychainCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
     }
 
     private func confirmAndRun(_ id:String) {
