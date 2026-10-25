@@ -31,46 +31,32 @@ for (pixels, filename) in variants {
                  xRadius: size * 0.23, yRadius: size * 0.23).fill()
 
     let paper = NSColor(calibratedRed: 0.96, green: 0.945, blue: 0.90, alpha: 1)
-    let accent = NSColor(calibratedRed: 0.39, green: 0.69, blue: 0.63, alpha: 1)
+    // A broad open book with its outer page corners lifting up from the spine.
+    // The larger, unruled silhouette stays recognizable at Dock and menu sizes.
     let left = NSBezierPath()
-    left.move(to: point(0.49, 0.57, size))
-    left.curve(to: point(0.20, 0.76, size), controlPoint1: point(0.39, 0.62, size), controlPoint2: point(0.28, 0.76, size))
-    left.line(to: point(0.20, 0.34, size))
-    left.curve(to: point(0.49, 0.43, size), controlPoint1: point(0.30, 0.29, size), controlPoint2: point(0.41, 0.42, size))
+    left.move(to: point(0.485, 0.70, size))
+    left.curve(to: point(0.08, 0.84, size), controlPoint1: point(0.36, 0.83, size), controlPoint2: point(0.20, 0.87, size))
+    left.line(to: point(0.08, 0.24, size))
+    left.curve(to: point(0.485, 0.34, size), controlPoint1: point(0.21, 0.30, size), controlPoint2: point(0.37, 0.31, size))
     left.close()
     paper.setFill()
     left.fill()
 
     let right = NSBezierPath()
-    right.move(to: point(0.51, 0.57, size))
-    right.curve(to: point(0.80, 0.76, size), controlPoint1: point(0.61, 0.62, size), controlPoint2: point(0.72, 0.76, size))
-    right.line(to: point(0.80, 0.34, size))
-    right.curve(to: point(0.51, 0.43, size), controlPoint1: point(0.70, 0.29, size), controlPoint2: point(0.59, 0.42, size))
+    right.move(to: point(0.515, 0.70, size))
+    right.curve(to: point(0.92, 0.84, size), controlPoint1: point(0.64, 0.83, size), controlPoint2: point(0.80, 0.87, size))
+    right.line(to: point(0.92, 0.24, size))
+    right.curve(to: point(0.515, 0.34, size), controlPoint1: point(0.79, 0.30, size), controlPoint2: point(0.63, 0.31, size))
     right.close()
     paper.setFill()
     right.fill()
-
-    let spine = NSBezierPath()
-    spine.lineWidth = max(1, size * 0.018)
-    spine.lineCapStyle = .round
-    spine.move(to: point(0.5, 0.445, size))
-    spine.line(to: point(0.5, 0.575, size))
-    NSColor(calibratedRed: 0.14, green: 0.22, blue: 0.24, alpha: 1).setStroke()
-    spine.stroke()
-
-    let pageLines = NSBezierPath()
-    pageLines.lineWidth = max(1, size * 0.012)
-    pageLines.lineCapStyle = .round
-    pageLines.move(to: point(0.265, 0.64, size)); pageLines.line(to: point(0.425, 0.53, size))
-    pageLines.move(to: point(0.265, 0.56, size)); pageLines.line(to: point(0.425, 0.49, size))
-    pageLines.move(to: point(0.575, 0.53, size)); pageLines.line(to: point(0.735, 0.64, size))
-    pageLines.move(to: point(0.575, 0.49, size)); pageLines.line(to: point(0.735, 0.56, size))
-    accent.setStroke()
-    pageLines.stroke()
 
     NSGraphicsContext.restoreGraphicsState()
     guard let png = bitmap.representation(using: .png, properties: [:]) else {
         fatalError("Could not encode icon")
     }
     try png.write(to: output.appendingPathComponent(filename))
+    if pixels == 1024 {
+        try png.write(to: output.deletingLastPathComponent().appendingPathComponent("AppIcon.png"))
+    }
 }
