@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5
+
+- Adds a Readwise Reader sync action for matching EPUB progress and highlights with the local Calibre library and KOReader sync services.
+- Makes reader highlights persist locally and preserves text selection when using the native reader toolbar.
+- Shrinks diagnostic exports to deduplicated issue summaries and removes full log contents.
+- Removes the retired dashboard device identifier from new progress records.
+
 ## 0.1.4
 
 - Adds automatic BOOX rotation setup to the Android settings transfer, including a backup of the previous system auto-rotate value.

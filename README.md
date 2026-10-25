@@ -22,6 +22,7 @@ The macOS app uses the system folder picker and persists its folder choices in a
 ## Current and planned support
 
 - **Available now:** macOS setup, Calibre bookshelf/reader, local folder import, KOReader Sync/CrossPoint endpoints, Hardcover and Readwise connector status, and optional Mac service controls.
+- **Readwise Reader:** pull progress and highlights into matching local EPUBs and connected KOReader sync. Highlights from Shelf can be sent to a matching Readwise Reader EPUB.
 - **Future:** a native iPhone target using the shared `ShelfCore` models and iOS Files document picker for iCloud Drive and third-party File Provider locations.
 - **Not included yet:** direct Google Drive or Microsoft Graph OAuth/API sync. Current OneDrive/Google Drive support uses files made available by their official desktop sync clients.
 
