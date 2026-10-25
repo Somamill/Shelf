@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Adds a paste-ready Readwise access-token field on Connections, validates tokens against Readwise before saving them to Keychain, and links directly to the token page.
+- Improves automatic book matching when author names are ordered differently across Calibre and reader metadata.
+- Hides raw document IDs from unmatched-position cards; matching continues to use metadata and binary identity behind the scenes.
+- Uses the documented Readwise authentication endpoint for secure token verification.
+
 ## 0.1.6
 
 - Moves Readwise Reader key setup and sync controls to Connections, with a visible connection state and disconnect action.

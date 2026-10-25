@@ -99,3 +99,5 @@ main{padding-top:30px}h1{font-size:29px;font-weight:650;letter-spacing:-.7px}.ey
 @media(prefers-reduced-motion:reduce){.setup-card,.provider-grid label,.check-list label,.btn,.small-btn{transition:none!important;transform:none!important}}
 .readwise-connection{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;margin:14px 0}.readwise-connection h3{margin:2px 0 4px}.readwise-connection p{margin:4px 0;color:#6e6e73;font-size:12px}.readwise-connection .hint{grid-column:2/4}.readwise-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.readwise-actions .text-btn{white-space:nowrap}
 @media(max-width:760px){.readwise-connection{grid-template-columns:auto 1fr}.readwise-actions,.readwise-connection .hint{grid-column:1/3}}
+
+.readwise-actions input{height:32px;min-width:240px;max-width:360px;flex:1;padding:0 10px;border:1px solid #d9d9e0;border-radius:8px;background:#fff;color:#252527;font:12px -apple-system,BlinkMacSystemFont}.readwise-actions input:focus{outline:2px solid #8fb6ee;outline-offset:1px}

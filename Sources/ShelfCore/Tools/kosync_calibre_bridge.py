@@ -97,7 +97,8 @@ def normalized_title(value):
     return "".join(ch for ch in value if ch.isalnum())
 
 def normalized_author(value):
-    return "".join(ch for ch in unicodedata.normalize("NFKC", str(value or "")).casefold() if ch.isalnum())
+    tokens = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", str(value or "")).casefold(), re.UNICODE)
+    return "".join(sorted(tokens))
 
 def local_book_identities():
     conn = sqlite3.connect(f"file:{METADATA_DB}?mode=ro", uri=True, timeout=10)
