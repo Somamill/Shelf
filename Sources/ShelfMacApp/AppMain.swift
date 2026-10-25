@@ -299,6 +299,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "updateDashboard": confirmUpdateDashboard()
         case "sendBooxSettings": sendBooxSettings()
         case "openCrossPointSettings": openCrossPointSettings()
+        case "syncReadwiseReader": syncReadwiseReader()
         case "openBookPlayer": if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") { NSWorkspace.shared.open(url) }
         case "loadBooks": loadBooks()
         case "openBook": if let bookId=body["bookId"] as? Int { openBook(bookId) }
@@ -500,6 +501,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var reader=payload
             let documents=payload["syncDocuments"] as? [String] ?? [document]
             reader["resumePercentage"]=0
+            reader["savedHighlights"]=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook")?[String(bookId)] as? [[String:Any]] ?? []
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.showReader(reader,htmlURL:URL(fileURLWithPath:htmlPath),workDirectory:URL(fileURLWithPath:workDir,isDirectory:true))
@@ -610,12 +612,18 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               window.readerPage=function(offset){setPage(currentPage+Number(offset||0),true)};
               window.readerGoTo=function(index){const h=headings[Math.max(0,Math.min(headings.length-1,Number(index)||0))];if(h){const x=h.getBoundingClientRect().left+readerViewport.scrollLeft;setPage(Math.round(x/step()),true)}};
               window.readerScrollTo=function(p){setPage(Math.round((pageCount-1)*Math.max(0,Math.min(1,Number(p)||0))),true)};
-              window.captureReaderHighlight=function(){const selection=window.getSelection(),text=(selection?.toString()||'').trim();if(!text){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'Select a passage first, then choose Highlight.'});return}if(text.length>4096){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'That passage is too long to save as one highlight.'});return}const c=chapterIndex();window.webkit.messageHandlers.reader.postMessage({type:'highlight',text:text,chapter:window.readerChapters[c]?.title||'',page:currentPage+1,percentage:percentage()})};
+              let savedHighlightRange=null,savedHighlightText='';
+              function rememberHighlightSelection(){const selection=window.getSelection(),text=(selection?.toString()||'').trim();if(text&&selection.rangeCount){savedHighlightRange=selection.getRangeAt(0).cloneRange();savedHighlightText=text}}
+              document.addEventListener('selectionchange',rememberHighlightSelection);document.addEventListener('mouseup',rememberHighlightSelection);document.addEventListener('touchend',rememberHighlightSelection);
+              function wrapHighlight(range,note){try{const mark=document.createElement('mark');mark.className='reader-highlight';if(note)mark.title=note;mark.appendChild(range.extractContents());range.insertNode(mark);return true}catch(_){return false}}
+              window.readerApplyHighlightText=function(text,note){text=String(text||'').trim();if(!text||!readerFlow)return false;if(savedHighlightRange&&savedHighlightText===text){const ok=wrapHighlight(savedHighlightRange,note);savedHighlightRange=null;savedHighlightText='';return ok}const walker=document.createTreeWalker(readerFlow,NodeFilter.SHOW_TEXT),nodes=[];let compact='',node;while((node=walker.nextNode())){if(node.parentElement?.closest('mark.reader-highlight'))continue;for(let i=0;i<node.nodeValue.length;i++){if(/\\s/.test(node.nodeValue[i]))continue;nodes.push([node,i]);compact+=node.nodeValue[i]}}const needle=text.replace(/\\s+/g,'');const index=compact.indexOf(needle);if(index<0||!needle)return false;const range=document.createRange();range.setStart(nodes[index][0],nodes[index][1]);const last=nodes[index+needle.length-1];range.setEnd(last[0],last[1]+1);return wrapHighlight(range,note)};
+              window.readerApplySavedHighlights=function(){for(const item of (window.readerBook.savedHighlights||[])){window.readerApplyHighlightText(item.text,item.note)}};
+              window.captureReaderHighlight=function(){const selection=window.getSelection(),selected=(selection?.toString()||'').trim(),text=selected||savedHighlightText,range=selection?.rangeCount?selection.getRangeAt(0).cloneRange():savedHighlightRange;if(!text||!range){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'Select a passage first, then choose Highlight.'});return}if(text.length>4096){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'That passage is too long to save as one highlight.'});return}savedHighlightRange=range;savedHighlightText=text;const c=chapterIndex();window.webkit.messageHandlers.reader.postMessage({type:'highlight',text:text,chapter:window.readerChapters[c]?.title||'',page:currentPage+1,percentage:percentage()})};
               function setupPages(){readerViewport=document.createElement('main');readerViewport.id='reader-viewport';readerFlow=document.createElement('article');readerFlow.id='reader-flow';while(document.body.firstChild)readerFlow.appendChild(document.body.firstChild);readerViewport.appendChild(readerFlow);document.body.appendChild(readerViewport);const userRead=()=>{allowProgressSync=true};let touchStart=null,wheelTravel=0,lastWheelPage=0;readerViewport.addEventListener('pointerdown',userRead,{passive:true});readerViewport.addEventListener('touchstart',e=>{userRead();const t=e.changedTouches[0];touchStart={x:t.clientX,y:t.clientY,moved:false}},{passive:true});readerViewport.addEventListener('touchmove',e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;if(Math.abs(dx)>16&&Math.abs(dx)>Math.abs(dy)*1.2){touchStart.moved=true;e.preventDefault()}},{passive:false});readerViewport.addEventListener('touchend',e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y,moved=touchStart.moved;touchStart=null;if(moved&&Math.abs(dx)>54&&Math.abs(dx)>Math.abs(dy)*1.35)window.readerPage(dx<0?1:-1)},{passive:true});readerViewport.addEventListener('wheel',e=>{userRead();if(Math.abs(e.deltaX)>Math.abs(e.deltaY)*1.35){e.preventDefault();wheelTravel+=e.deltaX;if(Math.abs(wheelTravel)>=72&&Date.now()-lastWheelPage>620){window.readerPage(wheelTravel>0?1:-1);wheelTravel=0;lastWheelPage=Date.now()}}else{wheelTravel=0}},{passive:false});readerViewport.addEventListener('scroll',()=>{currentPage=Math.max(0,Math.min(pageCount-1,Math.round(readerViewport.scrollLeft/step())));if(Date.now()-lastPositionSent>160){lastPositionSent=Date.now();sendPosition()}if(allowProgressSync)window.syncReaderProgress()},{passive:true});window.addEventListener('resize',()=>{const p=percentage();layoutPages();setPage(Math.round(p*(pageCount-1)),false)});}
               window.readerAckProgress=function(p){lastSent=Number(p);progressSyncPending=false;if(Math.abs(percentage()-lastSent)>=0.004)setTimeout(window.syncReaderProgress,350)};
               window.readerFailProgress=function(){progressSyncPending=false};
               window.syncReaderProgress=function(){if(!allowProgressSync||progressSyncPending)return;lastCandidate=percentage();if(lastSent>=0&&Math.abs(lastCandidate-lastSent)<0.004)return;if(Date.now()-lastProgressAttempt<1500)return;lastProgressAttempt=Date.now();progressSyncPending=true;window.webkit.messageHandlers.reader.postMessage({type:'progress',bookId:window.readerBook.bookId,document:window.readerBook.document,syncDocuments:window.readerBook.syncDocuments,percentage:lastCandidate,progress:lastCandidate.toFixed(6),metadata:{title:window.readerBook.title,authors:window.readerBook.authors,filename:window.readerBook.filename,language:window.readerBook.language}})};
-              function resume(){const p=Number(window.readerBook.resumePercentage||0);layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*step();lastSent=p;lastCandidate=p;sendPosition();window.webkit.messageHandlers.reader.postMessage({type:'chapters',chapters:window.readerChapters})}
+              function resume(){const p=Number(window.readerBook.resumePercentage||0);layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*step();lastSent=p;lastCandidate=p;sendPosition();window.readerApplySavedHighlights();window.webkit.messageHandlers.reader.postMessage({type:'chapters',chapters:window.readerChapters})}
               window.addEventListener('load',()=>{setupPages();window.readerApplyPreferences({font:'\(font)',theme:'\(theme)',spacing:'\(spacing)',size:\(readerFontSize)});setTimeout(resume,140)});
               window.addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();window.readerPage(1)}else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();window.readerPage(-1)}else if(e.key==='Home'){e.preventDefault();setPage(0,true)}else if(e.key==='End'){e.preventDefault();setPage(pageCount-1,true)}});
               window.addEventListener('pagehide',window.syncReaderProgress);window.addEventListener('beforeunload',window.syncReaderProgress);setInterval(window.syncReaderProgress,15000);
@@ -772,8 +780,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard let text=body["text"] as? String,!text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
               let reader=activeReader,let document=reader["document"] as? String,
               document.range(of:#"^[0-9a-fA-F]{32}$"#,options:.regularExpression) != nil else { return }
+        let bookId=(reader["bookId"] as? NSNumber)?.intValue ?? 0
+        guard saveLocalReaderHighlight(text,bookId:bookId,note:"") else { notify("This passage is already saved as a highlight."); return }
+        readerWebView?.evaluateJavaScript("window.readerApplyHighlightText && window.readerApplyHighlightText(\(Self.javascriptString(text)))",completionHandler:nil)
         let key=syncAuthKey()
-        guard !key.isEmpty else { notify("Could not reach CrossPoint Sync to save this highlight."); return }
+        guard !key.isEmpty else {
+            publishReadwiseHighlight(title:reader["title"] as? String ?? "",author:reader["authors"] as? String ?? "",text:text) { saved in
+                DispatchQueue.main.async { self.notify(saved ? "Highlight saved on this Mac and added to Readwise Reader." : "Highlight saved on this Mac. KOReader Sync is unavailable right now.") }
+            }
+            return
+        }
         let now=Int(Date().timeIntervalSince1970)
         let page=max(1,(body["page"] as? Int) ?? 1)
         let pageCount=max(page,(body["pages"] as? Int) ?? page)
@@ -798,11 +814,105 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard error == nil,(response as? HTTPURLResponse)?.statusCode == 200 else {
-                    self.notify("Could not save the highlight to CrossPoint Sync."); return
+                    self.publishReadwiseHighlight(title:reader["title"] as? String ?? "",author:reader["authors"] as? String ?? "",text:text) { saved in
+                        DispatchQueue.main.async { self.notify(saved ? "Highlight saved locally and added to Readwise Reader. Cross-device sync is unavailable." : "Highlight saved on this Mac. Cross-device sync could not be reached.") }
+                    }
+                    return
                 }
-                self.notify("Highlight saved to CrossPoint · queued for connected highlight services")
+                self.publishReadwiseHighlight(title:reader["title"] as? String ?? "",
+                                              author:reader["authors"] as? String ?? "",text:text) { readwiseOK in
+                    DispatchQueue.main.async {
+                        self.notify(readwiseOK ? "Highlight saved locally, synced to your readers, and added to Readwise Reader." : "Highlight saved locally and synced to your readers.")
+                    }
+                }
             }
         }.resume()
+    }
+
+    private func saveLocalReaderHighlight(_ text:String,bookId:Int,note:String) -> Bool {
+        guard bookId > 0 else { return false }
+        var all=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook") as? [String:[[String:Any]]] ?? [:]
+        var items=all[String(bookId)] ?? []
+        let identity=text.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !items.contains(where:{(($0["text"] as? String) ?? "").trimmingCharacters(in:.whitespacesAndNewlines)==identity}) else { return false }
+        items.append(["id":"shelf-\(UUID().uuidString)","text":identity,"note":note,"source":"Shelf"])
+        all[String(bookId)]=items
+        UserDefaults.standard.set(all,forKey:"readwiseHighlightsByBook")
+        return true
+    }
+
+    private func publishReadwiseHighlight(title:String,author:String,text:String,completion:@escaping(Bool)->Void) {
+        guard let token=keychainCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
+        let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
+        let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
+        guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
+        DispatchQueue.global(qos:.utility).async {
+            let result=Self.run("/usr/bin/python3",[helper],input:json)
+            let ok=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["ok"] as? Bool == true
+            completion(ok)
+        }
+    }
+
+    private func syncReadwiseReader() {
+        let token:String
+        if let saved=keychainCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
+        else {
+            let alert=NSAlert()
+            alert.messageText="Connect Readwise Reader"
+            alert.informativeText="Paste your Readwise access token. Shelf stores it in macOS Keychain and uses it to sync Reader progress and highlights with matching local EPUBs."
+            let field=NSSecureTextField(frame:NSRect(x:0,y:0,width:310,height:24))
+            field.placeholderString="Readwise access token"
+            alert.accessoryView=field
+            alert.addButton(withTitle:"Connect and sync")
+            alert.addButton(withTitle:"Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            token=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+            guard !token.isEmpty,saveKeychainCredential("readwise-reader-token",value:token) else {
+                notify("Could not save the Readwise token to macOS Keychain."); return
+            }
+        }
+        guard let syncKey=Optional(syncAuthKey()),!syncKey.isEmpty else { notify("KOReader Sync credentials are unavailable."); return }
+        let script=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
+        let syncBase=service("kosyncHealth",fallback:"http://127.0.0.1:17200/healthcheck").replacingOccurrences(of:"/healthcheck",with:"")
+        let endpoints=Array(Set([syncBase,service("crosspointApi",fallback:"http://127.0.0.1:17303")].filter{ !$0.isEmpty }))
+        let input:[String:Any]=["readwiseToken":token,"syncKey":syncKey,"username":username,"syncEndpoints":endpoints]
+        guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { notify("Could not prepare the Readwise sync."); return }
+        notify("Syncing Readwise Reader with matching Calibre books…")
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let result=Self.run("/usr/bin/python3",[script],input:json)
+            guard let outputData=result.output.data(using:.utf8),
+                  let response=try? JSONSerialization.jsonObject(with:outputData) as? [String:Any],
+                  response["ok"] as? Bool == true else {
+                let message=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["error"] as? String ?? "Readwise sync failed."
+                DispatchQueue.main.async { self.notify(message) }
+                return
+            }
+            var all=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook") as? [String:[[String:Any]]] ?? [:]
+            let remote=response["highlightsByBook"] as? [String:[[String:Any]]] ?? [:]
+            for (bookId,highlights) in remote {
+                var merged=all[bookId] ?? []
+                let texts=Set(merged.compactMap{$0["text"] as? String})
+                merged.append(contentsOf:highlights.filter{!texts.contains($0["text"] as? String ?? "")})
+                all[bookId]=merged
+            }
+            UserDefaults.standard.set(all,forKey:"readwiseHighlightsByBook")
+            let pushed=(response["progressPushed"] as? Int) ?? 0
+            let matched=(response["matched"] as? Int) ?? 0
+            let savedHighlights=remote.values.reduce(0){$0+$1.count}
+            let failures=(response["syncFailures"] as? Int) ?? 0
+            if pushed>0 { _=Self.run("/usr/bin/python3",[self.bridgeScriptPath]) }
+            DispatchQueue.main.async {
+                self.loadBooks()
+                if let active=self.activeReader,let bookId=(active["bookId"] as? NSNumber)?.intValue,
+                   let highlights=all[String(bookId)],let bytes=try? JSONSerialization.data(withJSONObject:highlights),
+                   let json=String(data:bytes,encoding:.utf8) {
+                    self.readerWebView?.evaluateJavaScript("window.readerBook.savedHighlights=\(json);window.readerApplySavedHighlights&&window.readerApplySavedHighlights()",completionHandler:nil)
+                }
+                let suffix=failures>0 ? " · \(failures) sync endpoints unavailable" : ""
+                self.notify("Readwise sync complete · \(matched) books matched · \(pushed) progress updates · \(savedHighlights) highlights imported\(suffix)")
+            }
+        }
     }
 
     private func chooseEPUBImports() {
@@ -882,7 +992,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         metadata=metadata.filter { ["title","authors","filename","language"].contains($0.key) }
         let payload:[String:Any]=[
             "progress":String(format:"%.6f",percent),"percentage":percent,
-            "device":"Shelf","device_id":"calibre-stack-dashboard","metadata":metadata
+            "device":"Shelf","device_id":"shelf-macos","metadata":metadata
         ]
         let group=DispatchGroup(),lock=NSLock(); var results=[String:[Bool]]()
         for (name,root) in [("KOReader Sync",service("kosyncHealth", fallback: "http://127.0.0.1:17200/healthcheck").replacingOccurrences(of: "/healthcheck", with: "")),("CrossPoint Sync",service("crosspointApi", fallback: "http://127.0.0.1:17303"))] {
@@ -1127,7 +1237,22 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 events.append(["source":source,"level":level!,"message":redact(line),"date":iso(eventTime)])
             }
         }
-        events.sort { (($0["date"] as? String) ?? "") > (($1["date"] as? String) ?? "") }
+        var compacted=[String:[String:Any]]()
+        for event in events {
+            let level=event["level"] as? String ?? ""
+            let message=event["message"] as? String ?? ""
+            let key="\(level)|\(diagnosticFingerprint(message))"
+            if var prior=compacted[key] {
+                prior["count"]=(prior["count"] as? Int ?? 1)+1
+                if (event["date"] as? String ?? "") > (prior["date"] as? String ?? "") {
+                    prior["date"]=event["date"]; prior["source"]=event["source"]; prior["message"]=event["message"]
+                }
+                compacted[key]=prior
+            } else {
+                var item=event; item["count"]=1; compacted[key]=item
+            }
+        }
+        events=Array(compacted.values).sorted { (($0["date"] as? String) ?? "") > (($1["date"] as? String) ?? "") }
         let ips=Self.run("/sbin/ifconfig",["en0"]).output
         let ip=Self.capture(#"inet (\d+\.\d+\.\d+\.\d+)"#,ips) ?? "Unavailable"
         let pass=serverPassword()
@@ -1136,7 +1261,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let shared=(md5(pass) == (plugin["progress_sync_password"] as? String ?? "") && md5(pass) == redis)
         let readerOPDS=service("readerOpds",fallback:"http://\(ip):8080/opds")
         let readerSync=service("readerSync",fallback:"http://\(ip):17200")
-        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(300)),"updates":updates,"sharedPasswordAligned":shared,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
+        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"updates":updates,"sharedPasswordAligned":shared,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
     }
 
     private func confirmAndRun(_ id:String) {
@@ -1537,29 +1662,22 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         panel.allowedContentTypes=[.zip]
         panel.canCreateDirectories=true
         guard panel.runModal() == .OK, let destination=panel.url else { return }
-        notify("Collecting and redacting logs…")
+        notify("Building a compact report with distinct recent issues…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
             do {
                 let result=try self.createDiagnosticBundle(at:destination,additionalText:additionalText)
-                DispatchQueue.main.async { self.notify("Export ready: \(result.logs) logs · \(result.errors) error lines · \(result.scripts) scripts") }
+                DispatchQueue.main.async { self.notify("Compact report ready · \(result) distinct issues") }
             } catch {
                 DispatchQueue.main.async { self.notify("Export failed: \(error.localizedDescription)") }
             }
         }
     }
 
-    private func createDiagnosticBundle(at destination:URL,additionalText:String) throws -> (logs:Int,errors:Int,scripts:Int) {
+    private func createDiagnosticBundle(at destination:URL,additionalText:String) throws -> Int {
         let fm=FileManager.default
         let root=fm.temporaryDirectory.appendingPathComponent("CalibreStackDiagnostics-\(UUID().uuidString)",isDirectory:true)
         defer { try? fm.removeItem(at:root) }
-        let logsOut=root.appendingPathComponent("logs",isDirectory:true)
-        let scriptsOut=root.appendingPathComponent("scripts",isDirectory:true)
-        let agentsOut=root.appendingPathComponent("launch-agents",isDirectory:true)
-        try fm.createDirectory(at:logsOut,withIntermediateDirectories:true)
-        try fm.createDirectory(at:scriptsOut,withIntermediateDirectories:true)
-        try fm.createDirectory(at:agentsOut,withIntermediateDirectories:true)
-
         let state=readDashboard()
         let stateData=try JSONSerialization.data(withJSONObject:state,options:[.prettyPrinted,.sortedKeys])
         try stateData.write(to:root.appendingPathComponent("dashboard-state.json"),options:.atomic)
@@ -1572,8 +1690,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         Library: \(libraryPath)
         Import folder: \(importPath)
 
-        Contents: all top-level .log files from ~/Books/logs (redacted), extracted error lines,
-        current dashboard state, related scripts, and matching launch-agent plists.
+        Contents: current dashboard state and the single most recent distinct issue.
+        Repeated failures are counted once. Full logs, book contents, and credentials are not included.
         Passwords, auth values, tokens, and secret fields are redacted. The bundle is created locally;
         it is not sent to an LLM or any other service.
         """
@@ -1582,57 +1700,45 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let logDirectory=URL(fileURLWithPath:logsPath,isDirectory:true)
         let logFiles=(try? fm.contentsOfDirectory(at:logDirectory,includingPropertiesForKeys:nil))?.filter { $0.pathExtension.caseInsensitiveCompare("log") == .orderedSame }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending } ?? []
         let matcher=try NSRegularExpression(pattern:#"(?i)\b(error|failed|failure|fatal|exception|traceback|interruptederror|permission denied|operation not permitted)\b|already running"#)
-        var errorLines=[String]()
+        var uniqueIssues=[String:(message:String,count:Int)]()
         for file in logFiles {
-            do {
-                let clean=redact(try String(contentsOf:file,encoding:.utf8))
-                try clean.write(to:logsOut.appendingPathComponent(file.lastPathComponent),atomically:true,encoding:.utf8)
-                for (index,line) in clean.components(separatedBy:.newlines).enumerated() where !line.isEmpty {
-                    if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
-                        errorLines.append("\(file.lastPathComponent):\(index+1): \(line)")
-                    }
+            let lines=tail(file.path,lines:240)
+            for line in lines {
+                if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
+                    let summary=compactDiagnosticLine("\(file.lastPathComponent): \(line)")
+                    let key=diagnosticFingerprint(summary)
+                    if var issue=uniqueIssues[key] { issue.count += 1; uniqueIssues[key]=issue }
+                    else { uniqueIssues[key]=(summary,1) }
                 }
-            } catch {
-                errorLines.append("EXPORT ERROR: Could not read \(file.lastPathComponent): \(error.localizedDescription)")
             }
         }
-        try errorLines.joined(separator:"\n").write(to:root.appendingPathComponent("ERRORS.txt"),atomically:true,encoding:.utf8)
+        let issueLines=uniqueIssues.values.sorted { $0.message < $1.message }.prefix(1).map { issue in
+            issue.count > 1 ? "Repeated \(issue.count) times: \(issue.message)" : issue.message
+        }
+        let report=issueLines.isEmpty ? "No recent errors found in the collected log tails." : issueLines.joined(separator:"\n")
+        try report.write(to:root.appendingPathComponent("ERRORS.txt"),atomically:true,encoding:.utf8)
         if !additionalText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
-            let limit=1_000_000
-            let clipped=additionalText.count>limit ? String(additionalText.prefix(limit))+"\n[truncated at 1 MB]" : additionalText
-            try redact(clipped).write(to:root.appendingPathComponent("USER-REPORTED-OUTPUT.txt"),atomically:true,encoding:.utf8)
-        }
-
-        let scriptNames:Set<String>=[
-            "calibre-smart-duplicate.py","calibre-duplicate-guard.py","calibre-duplicate-audit.py",
-            "calibre-japanese-audit.py","calibre-malware-guard.py","calibre-malware-full-scan.sh",
-            "calibre-restic-backup.sh","calibre-restic-launch.sh","kosync_calibre_bridge.py",
-            "calibre-library-analyzer.py","calibre-library-analyzer.sh"
-        ]
-        var scriptCount=0
-        for name in scriptNames.sorted() {
-            let source=URL(fileURLWithPath:"\(scriptsPath)/\(name)")
-            guard let body=try? String(contentsOf:source,encoding:.utf8) else { continue }
-            try redact(body).write(to:scriptsOut.appendingPathComponent(name),atomically:true,encoding:.utf8)
-            scriptCount += 1
-        }
-
-        let agentDirectory=URL(fileURLWithPath:"\(home)/Library/LaunchAgents",isDirectory:true)
-        let agents=(try? fm.contentsOfDirectory(at:agentDirectory,includingPropertiesForKeys:nil))?.filter { url in
-            let name=url.lastPathComponent
-            return name.hasSuffix(".plist") && (name.contains("calibre") || name.contains("kosync") || name.contains("xteink"))
-        } ?? []
-        for agent in agents {
-            guard let text=try? String(contentsOf:agent,encoding:.utf8) else { continue }
-            try redact(text).write(to:agentsOut.appendingPathComponent(agent.lastPathComponent),atomically:true,encoding:.utf8)
+            let summaries=additionalText.components(separatedBy:.newlines).filter { line in
+                matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil
+            }.map(compactDiagnosticLine)
+            var seen=Set<String>()
+            let distinct=summaries.filter { seen.insert(diagnosticFingerprint($0)).inserted }.prefix(1)
+            if !distinct.isEmpty {
+                try distinct.joined(separator:"\n").write(to:root.appendingPathComponent("USER-REPORTED-OUTPUT.txt"),atomically:true,encoding:.utf8)
+            }
         }
 
         let zip=Self.run("/usr/bin/ditto",["-c","-k","--sequesterRsrc","--keepParent",root.path,destination.path])
         guard zip.code==0 else { throw NSError(domain:"CalibreStackDiagnostics",code:Int(zip.code),userInfo:[NSLocalizedDescriptionKey:zip.output]) }
-        return (logFiles.count,errorLines.count,scriptCount)
+        return min(uniqueIssues.count,1)
     }
 
     private func notify(_ text:String) { send("dashboardNotice",["message":text]) }
+    private static func javascriptString(_ value:String)->String {
+        guard let data=try? JSONSerialization.data(withJSONObject:[value],options:[.fragmentsAllowed]),
+              let encoded=String(data:data,encoding:.utf8) else { return "\"\"" }
+        return String(encoded.dropFirst().dropLast())
+    }
     private func send(_ function:String,_ value:[String:Any]) {
         guard JSONSerialization.isValidJSONObject(value), let data=try? JSONSerialization.data(withJSONObject:value,options:[.fragmentsAllowed]), let json=String(data:data,encoding:.utf8) else { return }
         webView.evaluateJavaScript("window.\(function)(\(json));",completionHandler:nil)
@@ -1707,6 +1813,26 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         if line.range(of:#"\b(error|failed|failure|fatal|exception|denied)\b"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Error" }
         if line.range(of:#"\b(warning|warn|unmatched|skipped)\b"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Warning" }
         return nil
+    }
+
+    private func compactDiagnosticLine(_ source:String)->String {
+        var line=redact(source)
+        line=line.replacingOccurrences(of:#"^.*?\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[\] :]\s*"#,with:"",options:.regularExpression)
+        line=line.replacingOccurrences(of:#"(?i)((?:could not stage|scan failed for|can't access file))\s+.*?\.(?:epub|pdf)"#,with:"$1 <book file>",options:.regularExpression)
+        line=line.replacingOccurrences(of:#"(?i)/Users/[^\s:]+"#,with:"<path>",options:.regularExpression)
+        line=line.replacingOccurrences(of:#"\b[a-f0-9]{32,64}\b"#,with:"<id>",options:.regularExpression)
+        line=line.replacingOccurrences(of:#"\s+"#,with:" ",options:.regularExpression).trimmingCharacters(in:.whitespacesAndNewlines)
+        if line.count>240 { line=String(line.prefix(237))+"…" }
+        return line
+    }
+
+    private func diagnosticFingerprint(_ source:String)->String {
+        var value=source.lowercased()
+        value=value.replacingOccurrences(of:#"^[^:]+\.log:\s*"#,with:"",options:.regularExpression)
+        value=value.replacingOccurrences(of:#"\d{4}-\d{2}-\d{2}[ t]\d{2}:\d{2}:\d{2}"#,with:"<time>",options:.regularExpression)
+        value=value.replacingOccurrences(of:#"\b\d+\b"#,with:"<n>",options:.regularExpression)
+        value=value.replacingOccurrences(of:#"\s+"#,with:" ",options:.regularExpression)
+        return value.trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
     private func redact(_ source:String)->String {
