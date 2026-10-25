@@ -1,0 +1,530 @@
+#!/usr/bin/env python3
+
+import fcntl
+import difflib
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import shutil
+import subprocess
+import sys
+import time
+import tempfile
+import unicodedata
+from datetime import datetime
+from shelf_config import configured_path, configured_value, configuration_section
+
+BOOKS = str(configured_path("booksRoot", "~/Books"))
+LIBRARY = str(configured_path("library", os.path.join(BOOKS, "Calibre Library")))
+METADATA_DB = os.path.join(LIBRARY, "metadata.db")
+STATE = str(configured_path("state", os.path.join(BOOKS, "state")))
+LOGS = str(configured_path("logs", os.path.join(BOOKS, "logs")))
+
+USERNAME = configured_value("account", "username", "reader")
+TOOLS = configuration_section("tools")
+CONTAINERS = configuration_section("containers")
+CALIBREDB = TOOLS.get("calibredb") or shutil.which("calibredb") or "/Applications/calibre.app/Contents/MacOS/calibredb"
+DOCKER = TOOLS.get("docker") or shutil.which("docker") or "/usr/bin/docker"
+SERVER = configured_value("services", "calibreCli", "http://127.0.0.1:8080/#Calibre_Library")
+CONTAINER = CONTAINERS.get("kosync", "kosync")
+PASSFILE = os.path.join(STATE, "calibre-server-password")
+LOGFILE = os.path.join(LOGS, "kosync-calibre-bridge.log")
+LOCK = os.path.join(STATE, ".kosync-calibre-bridge.lock")
+ALIASES = os.path.join(STATE, "kosync-calibre-aliases.json")
+UNMATCHED = os.path.join(STATE, "kosync-calibre-unmatched.json")
+CROSSPOINT_DB = os.path.expanduser(configured_value("paths", "crosspointDatabase", os.path.join(BOOKS, "KOSync", "crosspoint-sync", "data", "crosspoint.db")))
+
+os.makedirs(LOGS, exist_ok=True)
+
+def log(msg):
+    with open(LOGFILE, "a", encoding="utf-8") as f:
+        f.write(f"[{datetime.now().isoformat(sep=' ', timespec='seconds')}] {msg}\n")
+
+def cmd(args, check=True):
+    return subprocess.run(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=check,
+        timeout=20,
+    )
+
+def redis(*args):
+    return cmd(
+        [DOCKER, "exec", CONTAINER, "redis-cli", "-n", "1", *args]
+    ).stdout.strip()
+
+def partial_md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        # KOReader samples from byte 0, then at 1 KiB * 4**i for i=0..10.
+        # The byte-zero sample is essential; inserting a 256-byte sample here
+        # creates a different ID that no KOReader device will recognize.
+        for offset in [0] + [1024 * (4 ** i) for i in range(11)]:
+            f.seek(offset)
+            sample = f.read(1024)
+            if not sample:
+                break
+            h.update(sample)
+
+    return h.hexdigest()
+
+def local_format_paths():
+    """Resolve Calibre format names to files; remote calibredb returns names only."""
+    uri = f"file:{METADATA_DB}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, timeout=10)
+    try:
+        rows = conn.execute(
+            "SELECT d.book, b.path, d.name, d.format "
+            "FROM data d JOIN books b ON b.id=d.book ORDER BY d.book, d.format"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    paths = {}
+    for book_id, relpath, name, fmt in rows:
+        candidate = os.path.join(LIBRARY, relpath, f"{name}.{fmt.lower()}")
+        if os.path.isfile(candidate):
+            paths.setdefault(book_id, []).append((fmt.upper(), candidate))
+    return paths
+
+def normalized_title(value):
+    value = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    value = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", value)
+    return "".join(ch for ch in value if ch.isalnum())
+
+def normalized_author(value):
+    return "".join(ch for ch in unicodedata.normalize("NFKC", str(value or "")).casefold() if ch.isalnum())
+
+def local_book_identities():
+    conn = sqlite3.connect(f"file:{METADATA_DB}?mode=ro", uri=True, timeout=10)
+    try:
+        rows = conn.execute("""
+            SELECT b.id, b.title, COALESCE(group_concat(a.name, ' '), '')
+              FROM books b
+              LEFT JOIN books_authors_link l ON l.book=b.id
+              LEFT JOIN authors a ON a.id=l.author
+             GROUP BY b.id, b.title
+        """).fetchall()
+    finally:
+        conn.close()
+    return [{"id": int(book_id), "title": title or "", "author": author or ""}
+            for book_id, title, author in rows]
+
+def crosspoint_document_metadata():
+    if not os.path.isfile(CROSSPOINT_DB):
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{CROSSPOINT_DB}?mode=ro", uri=True, timeout=3)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("""
+                SELECT d.document, d.title, d.author, d.filename
+                  FROM documents d JOIN users u ON u.id=d.user_id
+                 WHERE u.username=?
+            """, (USERNAME,)).fetchall()
+        finally:
+            conn.close()
+        return {row["document"].lower(): dict(row) for row in rows}
+    except sqlite3.Error as e:
+        log(f"WARNING could not read device title metadata: {type(e).__name__}")
+        return {}
+
+def automatic_book_match(title, author, identities):
+    wanted = normalized_title(title)
+    if len(wanted) < 4:
+        return None
+    wanted_author = normalized_author(author)
+    exact = [book for book in identities if normalized_title(book["title"]) == wanted]
+    if not exact:
+        exact = [book for book in identities
+                 if normalized_title(book["title"]).startswith(wanted)
+                 or wanted.startswith(normalized_title(book["title"]))]
+    if wanted_author:
+        author_hits = [book for book in exact
+                       if wanted_author in normalized_author(book["author"])
+                       or normalized_author(book["author"]) in wanted_author]
+        if author_hits:
+            exact = author_hits
+        elif exact and len({normalized_author(book["author"]) for book in exact}) > 1:
+            return None
+    if exact and len({normalized_title(book["title"]) for book in exact}) == 1 and len({normalized_author(book["author"]) for book in exact}) <= 1:
+        return exact[0]["id"]
+
+    scored = []
+    for book in identities:
+        candidate = normalized_title(book["title"])
+        ratio = difflib.SequenceMatcher(None, wanted, candidate).ratio() if candidate else 0
+        if wanted_author:
+            author_ratio = difflib.SequenceMatcher(None, wanted_author, normalized_author(book["author"])).ratio()
+            ratio = ratio * 0.78 + author_ratio * 0.22
+        scored.append((ratio, book["id"]))
+    scored.sort(reverse=True)
+    if scored and scored[0][0] >= (0.97 if wanted_author else 0.985) and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.04):
+        return scored[0][1]
+    return None
+
+def redis_book_metadata(key):
+    fields = {name: redis("HGET", key, name) for name in ("metadata", "title", "author", "authors", "filename")}
+    meta = {}
+    if fields.get("metadata"):
+        try:
+            value = json.loads(fields["metadata"])
+            if isinstance(value, dict):
+                meta.update(value)
+        except (ValueError, TypeError):
+            pass
+    for key_name in ("title", "author", "authors", "filename"):
+        if fields.get(key_name) and key_name not in meta:
+            meta[key_name] = fields[key_name]
+    return meta
+
+def set_custom(column, book_id, value):
+    # calibredb list uses *label syntax for custom fields, but set_custom
+    # expects the bare Calibre column label (for example, ko_progint).
+    column_label = column[1:] if column.startswith("#") else column
+    args = [
+        CALIBREDB,
+        "--with-library", SERVER,
+        "--username", USERNAME,
+        "--password", f"<f:{PASSFILE}>",
+        "set_custom",
+        column_label,
+        str(book_id),
+        str(value),
+    ]
+
+    p = cmd(args, check=False)
+    if p.returncode != 0:
+        detail = p.stderr.strip().replace("\n", " | ")[:300]
+        log(
+            f"ERROR custom field update failed: {column_label} book={book_id} "
+            f"exit={p.returncode}: {detail}"
+        )
+        return False
+    return True
+
+def write_json_atomic(path, payload):
+    fd, temp_path = tempfile.mkstemp(prefix=".kosync-calibre-", dir=STATE)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+def main():
+
+    lock_fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(lock_fd)
+        return
+
+    try:
+
+        log("BRIDGE START")
+
+        book_result = cmd([
+            CALIBREDB,
+            "--with-library", SERVER,
+            "--username", USERNAME,
+            "--password", f"<f:{PASSFILE}>",
+            "list",
+            "--for-machine",
+            "--fields", "id,title,formats,*ko_md5",
+        ], check=False)
+
+        if book_result.returncode != 0:
+            detail = book_result.stderr.strip().replace("\n", " | ")[:500]
+            log(f"ERROR calibredb list failed (exit={book_result.returncode}): {detail}")
+            return
+
+        raw = book_result.stdout.strip()
+        if not raw:
+            log("ERROR calibredb list returned empty output; skipping this bridge pass")
+            return
+
+        try:
+            decoder = json.JSONDecoder()
+            books, end = decoder.raw_decode(raw)
+        except json.JSONDecodeError as e:
+            log(f"ERROR calibredb list returned invalid JSON at char {e.pos}; skipping this pass")
+            return
+
+        # The installed NoTrans plugin writes hook status to stdout after
+        # calibredb's otherwise valid JSON response. Accept only those known
+        # trailing diagnostics; unexpected text still fails closed.
+        trailing = raw[end:].strip()
+        if trailing:
+            lines = [line.strip() for line in trailing.splitlines() if line.strip()]
+            if not lines or not all(line.startswith("NoTrans:") for line in lines):
+                log("ERROR unexpected text after calibredb JSON; skipping this pass")
+                return
+            log(f"INFO ignored {len(lines)} NoTrans hook diagnostic lines")
+
+        if not isinstance(books, list):
+            log("ERROR calibredb list returned unexpected JSON type; skipping this pass")
+            return
+
+        mapping = {}
+        md5_count = 0
+        local_paths = local_format_paths()
+        identities = local_book_identities()
+        remote_metadata = crosspoint_document_metadata()
+        book_ids = {int(book.get("id")) for book in books if book.get("id") is not None}
+
+        try:
+            with open(ALIASES, "r", encoding="utf-8") as aliases_file:
+                aliases = json.load(aliases_file)
+            if not isinstance(aliases, dict):
+                aliases = {}
+        except FileNotFoundError:
+            aliases = {}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
+            aliases = {}
+            log(f"WARNING could not load progress aliases: {type(e).__name__}: {e}")
+
+        for book in books:
+
+            book_id = book.get("id")
+
+            existing = (
+                book.get("ko_md5")
+                or book.get("#ko_md5")
+                or book.get("*ko_md5")
+                or ""
+            )
+
+            if isinstance(existing, list):
+                existing = existing[0] if existing else ""
+
+            existing = str(existing).strip()
+
+            formats = book.get("formats") or []
+
+            if isinstance(formats, str):
+                formats = [formats]
+
+            available = {
+                str(fmt).upper()
+                for fmt in formats
+                if isinstance(fmt, str)
+            }
+            candidates = [
+                path for fmt, path in local_paths.get(book_id, [])
+                if not available or fmt in available
+            ]
+
+            # Hash every local format so Calibre can match a device copy even
+            # when the same title has EPUB/AZW3/PDF editions. The first format
+            # remains the canonical ID used by the dashboard reader.
+            candidate_digests = []
+            for path in candidates:
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    digest = partial_md5(path)
+                    if digest not in candidate_digests:
+                        candidate_digests.append(digest)
+                except Exception:
+                    continue
+
+            if not candidate_digests:
+                continue
+
+            # Previous releases used a non-KOReader checksum. Preserve those
+            # IDs as aliases before correcting the Calibre custom column.
+            if (existing and existing not in candidate_digests
+                    and len(existing) == 32
+                    and all(c in "0123456789abcdefABCDEF" for c in existing)):
+                aliases.setdefault(existing.lower(), {
+                    "book_id": int(book_id),
+                    "reason": "Preserved previous Calibre sync identifier",
+                })
+                mapping[existing.lower()] = book_id
+
+            canonical = candidate_digests[0]
+            if existing.lower() != canonical.lower():
+                if set_custom("#ko_md5", book_id, canonical):
+                    md5_count += 1
+
+            for digest in candidate_digests:
+                mapping[digest.lower()] = book_id
+
+        # Additional device file hashes can identify another edition of a
+        # Calibre title. Validate and preserve the map on every bridge pass.
+        valid_aliases = {}
+        for digest, value in aliases.items():
+            if not isinstance(digest, str) or len(digest) != 32 or any(c not in "0123456789abcdef" for c in digest.lower()):
+                continue
+            try:
+                alias_book_id = int(value.get("book_id")) if isinstance(value, dict) else int(value)
+            except (TypeError, ValueError):
+                continue
+            if alias_book_id in book_ids:
+                valid_aliases[digest.lower()] = value
+                mapping[digest.lower()] = alias_book_id
+        aliases = valid_aliases
+        write_json_atomic(ALIASES, aliases)
+
+        # koreader-sync-server stores each document as a Redis hash at
+        # user:<username>:document:<partial-md5>, not as separate keys with
+        # field suffixes. Match the server's actual schema and read fields
+        # with HGET.
+        keys = cmd([
+            DOCKER,
+            "exec", CONTAINER,
+            "redis-cli", "-n", "1",
+            "--scan",
+            "--pattern", f"user:{USERNAME}:document:*",
+        ]).stdout.splitlines()
+
+        found = 0
+        latest_by_book = {}
+        unmatched = []
+
+        for key in keys:
+
+            prefix = f"user:{USERNAME}:document:"
+            if not key.startswith(prefix):
+                continue
+
+            if key == f"user:{USERNAME}:key":
+                continue
+            digest = key[len(prefix):]
+
+            percentage = redis("HGET", key, "percentage")
+            progress = redis("HGET", key, "progress")
+            device = redis("HGET", key, "device")
+            device_id = redis("HGET", key, "device_id")
+            timestamp = redis("HGET", key, "timestamp")
+            if not percentage:
+                continue
+
+            found += 1
+
+            book_id = mapping.get(digest)
+
+            if book_id is None:
+                metadata = redis_book_metadata(key)
+                stored = remote_metadata.get(digest.lower(), {})
+                for field in ("title", "author", "authors", "filename"):
+                    if not metadata.get(field) and stored.get(field):
+                        metadata[field] = stored[field]
+                title = str(metadata.get("title") or "").strip()
+                author = str(metadata.get("author") or metadata.get("authors") or "").strip()
+                if title:
+                    candidate_id = automatic_book_match(title, author, identities)
+                    if candidate_id in book_ids:
+                        book_id = candidate_id
+                        mapping[digest.lower()] = candidate_id
+                        aliases[digest.lower()] = {
+                            "book_id": candidate_id,
+                            "reason": "Automatic match from device title metadata",
+                        }
+                        log(f"AUTO-MATCHED progress md5={digest} book={candidate_id} title={title[:100]}")
+
+            if book_id is None:
+                log(f"UNMATCHED md5={digest} percent={percentage} device={device}")
+                try:
+                    item = {
+                        "document": digest,
+                        "percentage": max(0.0, min(1.0, float(percentage))),
+                        "device": device or "Unknown device",
+                        "timestamp": int(timestamp or 0),
+                    }
+                    if title:
+                        item["title"] = title
+                    if author:
+                        item["author"] = author
+                    unmatched.append(item)
+                except (TypeError, ValueError):
+                    pass
+                continue
+
+            try:
+                pct = float(percentage)
+                sort_timestamp = int(timestamp or 0)
+            except (TypeError, ValueError):
+                log(f"WARNING invalid progress fields md5={digest}; skipped")
+                continue
+
+            current = latest_by_book.get(book_id)
+            if current is None or sort_timestamp >= current[0]:
+                latest_by_book[book_id] = (
+                    sort_timestamp, digest, percentage, progress, device, device_id, pct
+                )
+
+        for book_id, (sort_timestamp, digest, percentage, progress, device, device_id, pct) in latest_by_book.items():
+
+            pct100 = max(0, min(100, round(pct * 100)))
+
+            status = "Finished" if pct >= 0.999 else "Reading"
+            finished = "true" if pct >= 0.999 else "false"
+
+            update_ok = True
+            for column, value in [
+                ("#ko_progfloat", percentage),
+                ("#ko_progint", str(pct100)),
+                ("#ko_status", status),
+                ("#ko_statusbool", finished),
+            ]:
+                update_ok = set_custom(column, book_id, value) and update_ok
+
+            if progress:
+                update_ok = set_custom("#ko_loc", book_id, progress) and update_ok
+
+            if device:
+                update_ok = set_custom("#ko_device_name", book_id, device) and update_ok
+
+            if device_id:
+                update_ok = set_custom("#ko_device_id", book_id, device_id) and update_ok
+
+            if sort_timestamp:
+                try:
+                    dt = datetime.fromtimestamp(sort_timestamp)
+                    datestr = dt.strftime("%Y-%m-%d")
+                except Exception:
+                    datestr = datetime.now().strftime("%Y-%m-%d")
+            else:
+                datestr = datetime.now().strftime("%Y-%m-%d")
+
+            update_ok = set_custom("#ko_lastsync", book_id, datestr) and update_ok
+            update_ok = set_custom("#ko_lastmod", book_id, datestr) and update_ok
+
+            if update_ok:
+                log(
+                    f"SYNCED book={book_id} md5={digest} "
+                    f"percentage={percentage} device={device}"
+                )
+            else:
+                log(f"ERROR partial progress sync book={book_id} md5={digest}")
+
+        write_json_atomic(UNMATCHED, {"generatedAt": int(time.time()), "items": unmatched})
+
+        log(
+            f"BRIDGE END books={len(books)} "
+            f"md5_created={md5_count} "
+            f"documents={found} matched={len(latest_by_book)}"
+        )
+
+    except Exception as e:
+
+        log(f"ERROR {type(e).__name__}: {e}")
+        raise
+
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
+
+if __name__ == "__main__":
+    main()

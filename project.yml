@@ -1,0 +1,52 @@
+name: Shelf
+options:
+  bundleIdPrefix: app.shelf
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+packages:
+  ShelfCore:
+    path: .
+targets:
+  Shelf:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/ShelfMacApp
+    resources:
+      - path: Resources/Dashboard/index.html
+      - path: Resources/Dashboard/style.css
+      - path: Resources/Dashboard/app.js
+      - path: Resources/Icons/AppIcon.icns
+      - path: Sources/ShelfCore/Tools/bookshelf.py
+      - path: Sources/ShelfCore/Tools/reader_book.py
+      - path: Sources/ShelfCore/Tools/kosync_calibre_bridge.py
+      - path: Sources/ShelfCore/Tools/shelf_config.py
+      - path: Sources/ShelfCore/Tools/boox_settings.py
+      - path: Config/config.example.json
+    dependencies:
+      - package: ShelfCore
+        product: ShelfCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
+        PRODUCT_NAME: Shelf
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Shelf
+        INFOPLIST_KEY_CFBundleIconFile: AppIcon.icns
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.books
+        INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_APP_SANDBOX: NO
+schemes:
+  Shelf:
+    build:
+      targets:
+        Shelf: all
+    run:
+      config: Debug
+    archive:
+      config: Release

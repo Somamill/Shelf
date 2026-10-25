@@ -1,0 +1,54 @@
+{
+  "setupCompleted": false,
+  "connectionsConfigured": false,
+  "paths": {
+    "booksRoot": "~/Books",
+    "library": "~/Books/Calibre Library",
+    "state": "~/Books/state",
+    "scripts": "~/Books/scripts",
+    "logs": "~/Books/logs",
+    "import": "~/Books/Calibre Import",
+    "bridgeScript": "",
+    "project": "~/Shelf"
+  },
+  "account": {
+    "username": "reader"
+  },
+  "services": {
+    "calibreOpds": "http://127.0.0.1:8080/opds/",
+    "kosyncHealth": "http://127.0.0.1:17200/healthcheck",
+    "crosspointHealth": "http://127.0.0.1:17303/healthz",
+    "crosspointApi": "http://127.0.0.1:17303",
+    "hardcoverSettings": "http://127.0.0.1:17300/app/#/settings",
+    "xteinkStatus": "",
+    "readerOpds": "",
+    "readerSync": "",
+    "caddyOpds": ""
+  },
+  "tools": {
+    "docker": "",
+    "brew": "",
+    "adb": "",
+    "calibreApp": ""
+  },
+  "launchAgents": {
+    "calibre": "app.shelf.calibre-server",
+    "caddy": "homebrew.mxcl.caddy",
+    "importer": "app.shelf.calibre-importer",
+    "bridge": "app.shelf.kosync-calibre-bridge",
+    "backup": "app.shelf.restic-backup",
+    "japanese": "app.shelf.japanese-audit",
+    "duplicates": "app.shelf.duplicate-guard",
+    "duplicateAudit": "app.shelf.duplicate-audit",
+    "malware": "app.shelf.malware-guard",
+    "fullScan": "app.shelf.malware-full-scan",
+    "xteink": "app.shelf.xteink-sync-configurator"
+  },
+  "containers": {
+    "kosync": "kosync",
+    "crosspoint": "crosspoint-sync"
+  },
+  "logFiles": {
+    "caddy": ""
+  }
+}

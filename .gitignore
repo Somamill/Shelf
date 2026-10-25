@@ -1,0 +1,31 @@
+# Local and generated build products
+.DS_Store
+__pycache__/
+*.py[cod]
+*.app/
+make_icon
+build/
+dist/
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Per-machine configuration and credentials
+config.local.json
+config.json
+*.local.json
+*.secret
+*.pem
+*.key
+
+# Logs, libraries, backups, and reader state
+*.log
+metadata.db
+*.epub
+*.mobi
+*.azw*
+*.cbz
+*.pdf
+backups/
+state/
