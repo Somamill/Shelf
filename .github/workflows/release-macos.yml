@@ -3,6 +3,12 @@ name: Signed macOS release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to package and notarize
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -10,8 +16,13 @@ permissions:
 jobs:
   signed-release:
     runs-on: macos-15
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
       - name: Check Apple signing secrets
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
@@ -68,11 +79,11 @@ jobs:
           xcrun stapler staple "$APP_PATH"
           codesign --verify --deep --strict "$APP_PATH"
           spctl --assess --type execute --verbose "$APP_PATH"
-          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${GITHUB_REF_NAME}.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip"
       - name: Attach notarized app to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Shelf ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/Shelf-${GITHUB_REF_NAME}.zip" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --generate-notes
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip" --repo "$GITHUB_REPOSITORY" --clobber
