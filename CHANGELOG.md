@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.10
+
+- Replaces the book mark with a larger, simpler open-book silhouette whose outer page wings lift upward from the spine.
+- Regenerates every macOS icon size and updates the Shelf dashboard wordmark to use the same mark.
+
+
 ## 0.1.9
 
 - Recognizes chapter links emitted by Calibre HTMLZ conversion, including EPUBs whose chapter markers are flattened into titled `div.main` elements rather than semantic headings.
