@@ -1,6 +1,6 @@
 # Shelf
 
-**Current release: 0.1.2** — an early macOS release. See [GitHub Releases](https://github.com/Somamill/Shelf/releases) for downloads and notes.
+**Current release: 0.1.3** — an early macOS release. See [GitHub Releases](https://github.com/Somamill/Shelf/releases) for downloads and notes.
 
 Shelf is a native macOS reading dashboard for a Calibre library. It includes a bookshelf, paginated EPUB reader, reading-progress and highlight sync, setup wizard, service health, and optional device configuration. The setup model is shared in `ShelfCore` so an iPhone companion can be added later.
 

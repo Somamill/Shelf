@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3
+
+- Adds horizontal swipes between dashboard sections while preserving navigation controls and vertical scrolling.
+- Opens the reader immediately while saved progress loads in the background; EPUB conversion is cached by file revision for faster repeat opens.
+- Simplifies the reader header to an icon-only back control and retains chapter navigation in the lower reader controls.
+- Automatically links each progress record to its strongest Calibre candidate when title or filename identity is available, and adds a review lane for lower-confidence suggestions.
+- Ships the Japanese and multilingual EPUB chapter lookup and paginated column-count fixes from 0.1.2.
+
+
 ## 0.1.2
 
 - Adds horizontal page turns by touch swipe and trackpad gestures while keeping keyboard and button navigation available.

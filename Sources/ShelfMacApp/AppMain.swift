@@ -113,6 +113,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerContentView:NSView?
     private var readerWebView:WKWebView?
     private var readerTempDirectory:URL?
+    private var readerWorkIsPersistentCache=false
     private var activeReader:[String:Any]?
     private var readerPageLabel:NSTextField?
     private var readerHighlightButton:NSButton?
@@ -498,10 +499,17 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
             var reader=payload
             let documents=payload["syncDocuments"] as? [String] ?? [document]
-            let saved=self.fetchReaderProgress(documents)
-            reader["resumePercentage"]=saved ?? 0
-            DispatchQueue.main.async {
+            reader["resumePercentage"]=0
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 self.showReader(reader,htmlURL:URL(fileURLWithPath:htmlPath),workDirectory:URL(fileURLWithPath:workDir,isDirectory:true))
+                DispatchQueue.global(qos:.utility).async { [weak self] in
+                    guard let self,let saved=self.fetchReaderProgress(documents) else { return }
+                    DispatchQueue.main.async {
+                        guard let active=self.activeReader,(active["bookId"] as? Int)==bookId else { return }
+                        self.readerWebView?.evaluateJavaScript("window.readerSetResume && window.readerSetResume(\(saved));",completionHandler:nil)
+                    }
+                }
             }
         }
     }
@@ -547,6 +555,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func showReader(_ payload:[String:Any],htmlURL:URL,workDirectory:URL) {
         guard let title=payload["title"] as? String else { return }
         let previous=readerTempDirectory
+        let previousIsPersistentCache=readerWorkIsPersistentCache
         let content=WKUserContentController()
         content.add(WeakScriptMessageHandler(self),name:"reader")
         let config=WKWebViewConfiguration(); config.userContentController=content
@@ -581,7 +590,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               window.readerBook=\(source);
               const style=document.createElement('style');
               style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:88px 280px 104px;column-width:790px!important;column-gap:560px!important;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
-              let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
+              let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,userHasNavigated=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
               window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd']};const palette=themes[p.theme]||themes.paper;const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
               let titleKey=(window.readerBook.title||'').trim().toLocaleLowerCase();
               const chapterEntries=[],seenChapterTargets=new Set();
@@ -596,7 +605,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               function chapterIndex(){let result=0,scroll=readerViewport?readerViewport.scrollLeft:0,best=-Infinity;for(let n=0;n<headings.length;n++){const x=headings[n].getBoundingClientRect().left+scroll;if(x<=scroll+step()*.42&&x>best){best=x;result=n}}return result;}
               function percentage(){return pageCount<=1?0:currentPage/(pageCount-1)}
               function sendPosition(){if(!readerViewport)return;layoutPages();const c=chapterIndex();lastCandidate=percentage();window.webkit.messageHandlers.reader.postMessage({type:'position',percentage:lastCandidate,chapter:c,chapterTitle:window.readerChapters[c]?.title||'',page:currentPage+1,pages:pageCount})}
-              function setPage(page,userAction){if(!readerViewport)return;layoutPages();currentPage=Math.max(0,Math.min(pageCount-1,Math.round(page)));if(userAction)allowProgressSync=true;readerViewport.scrollTo({left:currentPage*step(),behavior:'smooth'});window.setTimeout(sendPosition,240);if(userAction)window.setTimeout(window.syncReaderProgress,320)}
+              function setPage(page,userAction){if(!readerViewport)return;layoutPages();currentPage=Math.max(0,Math.min(pageCount-1,Math.round(page)));if(userAction){allowProgressSync=true;userHasNavigated=true}readerViewport.scrollTo({left:currentPage*step(),behavior:'smooth'});window.setTimeout(sendPosition,240);if(userAction)window.setTimeout(window.syncReaderProgress,320)}
+              window.readerSetResume=function(value){const p=Math.max(0,Math.min(1,Number(value)||0));window.readerBook.resumePercentage=p;if(userHasNavigated)return;lastSent=p;lastCandidate=p;if(!readerViewport)return;layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*step();sendPosition()};
               window.readerPage=function(offset){setPage(currentPage+Number(offset||0),true)};
               window.readerGoTo=function(index){const h=headings[Math.max(0,Math.min(headings.length-1,Number(index)||0))];if(h){const x=h.getBoundingClientRect().left+readerViewport.scrollLeft;setPage(Math.round(x/step()),true)}};
               window.readerScrollTo=function(p){setPage(Math.round((pageCount-1)*Math.max(0,Math.min(1,Number(p)||0))),true)};
@@ -617,7 +627,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         web.onEPUBDrop = { [weak self] urls in self?.queueEPUBImports(urls) }
         web.navigationDelegate=self
         let container=NSView(frame:.zero)
-        let toolbar=makeReaderToolbar(title:title,author:readerData["authors"] as? String ?? "")
+        let toolbar=makeReaderToolbar()
         container.addSubview(web); container.addSubview(toolbar)
         for view in [toolbar,web] { view.translatesAutoresizingMaskIntoConstraints=false }
         NSLayoutConstraint.activate([
@@ -626,28 +636,23 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         ])
         if dashboardContentView == nil { dashboardContentView=window.contentView }
         readerContentView=container; readerWebView=web; activeReader=readerData; readerTempDirectory=workDirectory
+        readerWorkIsPersistentCache=payload["persistentCache"] as? Bool ?? false
         readerChapters=[]
         readerProgressSlider?.doubleValue=(payload["resumePercentage"] as? Double) ?? 0
         readerProgressLabel?.stringValue="\(Int((((payload["resumePercentage"] as? Double) ?? 0)*100).rounded()))%"
         web.loadFileURL(htmlURL,allowingReadAccessTo:workDirectory)
         window.contentView=container; window.title="\(title) · Shelf"; window.minSize=NSSize(width:900,height:700)
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
-        if let previous,previous != workDirectory { DispatchQueue.main.asyncAfter(deadline:.now()+2) { try? FileManager.default.removeItem(at:previous) } }
+        if let previous,previous != workDirectory,!previousIsPersistentCache { DispatchQueue.main.asyncAfter(deadline:.now()+2) { try? FileManager.default.removeItem(at:previous) } }
     }
 
-    private func makeReaderToolbar(title:String,author:String)->NSView {
+    private func makeReaderToolbar()->NSView {
         let toolbar=ReaderOverlayView(frame:.zero)
         let back=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Back to library")!,target:self,action:#selector(closeReader))
-        back.isBordered=false; back.toolTip="Back to library"; back.setContentHuggingPriority(.required,for:.horizontal); back.imagePosition = .imageLeading
-        let titleLabel=NSTextField(labelWithString:title)
-        titleLabel.font = .systemFont(ofSize:13,weight:.semibold); titleLabel.lineBreakMode = .byTruncatingTail
-        let authorLabel=NSTextField(labelWithString:author.isEmpty ? "Now reading" : author)
-        authorLabel.font = .systemFont(ofSize:11); authorLabel.textColor = .secondaryLabelColor; authorLabel.lineBreakMode = .byTruncatingTail
-        let titleStack=NSStackView(views:[titleLabel,authorLabel]); titleStack.orientation = .vertical; titleStack.alignment = .leading; titleStack.distribution = .fillEqually; titleStack.spacing=0
-        titleStack.setContentHuggingPriority(.defaultLow,for:.horizontal); titleStack.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        back.isBordered=false; back.toolTip="Back to library"; back.setContentHuggingPriority(.required,for:.horizontal); back.imagePosition = .imageOnly
+        back.widthAnchor.constraint(equalToConstant:32).isActive=true; back.heightAnchor.constraint(equalToConstant:32).isActive=true
         let chapter=NSPopUpButton(frame:.zero,pullsDown:false); chapter.addItem(withTitle:"Contents"); chapter.target=self; chapter.action=#selector(readerSelectChapter(_:)); chapter.cell?.lineBreakMode = .byTruncatingTail; chapter.widthAnchor.constraint(equalToConstant:160).isActive=true; chapter.controlSize = .small; readerChapterMenu=chapter
-        let top=NSStackView(views:[back,titleStack]); top.orientation = .horizontal; top.alignment = .centerY; top.distribution = .fill; top.spacing=12; top.translatesAutoresizingMaskIntoConstraints=false
-        titleStack.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        let top=NSStackView(views:[back]); top.orientation = .horizontal; top.alignment = .centerY; top.distribution = .fill; top.translatesAutoresizingMaskIntoConstraints=false
 
         let previous=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Previous page")!,target:self,action:#selector(readerPreviousPage))
         let next=NSButton(image:NSImage(systemSymbolName:"chevron.right",accessibilityDescription:"Next page")!,target:self,action:#selector(readerNextPage))
@@ -666,8 +671,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         titleCapsule.wantsLayer=true; titleCapsule.layer?.cornerRadius=17; titleCapsule.layer?.masksToBounds=true; titleCapsule.layer?.borderWidth=1; titleCapsule.layer?.borderColor=NSColor.separatorColor.withAlphaComponent(0.28).cgColor
         toolbar.addSubview(titleCapsule); toolbar.addSubview(dock); titleCapsule.addSubview(top)
         NSLayoutConstraint.activate([
-            titleCapsule.topAnchor.constraint(equalTo:toolbar.topAnchor),titleCapsule.centerXAnchor.constraint(equalTo:toolbar.centerXAnchor),titleCapsule.widthAnchor.constraint(lessThanOrEqualToConstant:1040),titleCapsule.leadingAnchor.constraint(greaterThanOrEqualTo:toolbar.leadingAnchor),titleCapsule.trailingAnchor.constraint(lessThanOrEqualTo:toolbar.trailingAnchor),titleCapsule.heightAnchor.constraint(equalToConstant:52),
-            top.leadingAnchor.constraint(equalTo:titleCapsule.leadingAnchor,constant:14),top.trailingAnchor.constraint(equalTo:titleCapsule.trailingAnchor,constant:-14),top.centerYAnchor.constraint(equalTo:titleCapsule.centerYAnchor),top.heightAnchor.constraint(equalToConstant:34),
+            titleCapsule.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:4),titleCapsule.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:8),titleCapsule.widthAnchor.constraint(equalToConstant:42),titleCapsule.heightAnchor.constraint(equalToConstant:42),
+            top.leadingAnchor.constraint(equalTo:titleCapsule.leadingAnchor,constant:5),top.trailingAnchor.constraint(equalTo:titleCapsule.trailingAnchor,constant:-5),top.centerYAnchor.constraint(equalTo:titleCapsule.centerYAnchor),top.heightAnchor.constraint(equalToConstant:32),
             dock.centerXAnchor.constraint(equalTo:toolbar.centerXAnchor),dock.bottomAnchor.constraint(equalTo:toolbar.bottomAnchor,constant:-22),dock.widthAnchor.constraint(lessThanOrEqualToConstant:900),dock.leadingAnchor.constraint(greaterThanOrEqualTo:toolbar.leadingAnchor),dock.trailingAnchor.constraint(lessThanOrEqualTo:toolbar.trailingAnchor),dock.heightAnchor.constraint(equalToConstant:58),
             bottom.leadingAnchor.constraint(equalTo:dock.leadingAnchor,constant:13),bottom.trailingAnchor.constraint(equalTo:dock.trailingAnchor,constant:-13),bottom.centerYAnchor.constraint(equalTo:dock.centerYAnchor),bottom.heightAnchor.constraint(equalToConstant:38),
             dock.bottomAnchor.constraint(greaterThanOrEqualTo:toolbar.bottomAnchor,constant:-80)
@@ -752,14 +757,15 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func closeReader() {
         guard let dashboardContentView else { return }
         let directory=readerTempDirectory
+        let removeDirectory = !readerWorkIsPersistentCache
         readerWebView?.stopLoading()
         readerWebView?.configuration.userContentController.removeScriptMessageHandler(forName:"reader")
         readerSettingsPopover?.performClose(nil); readerSettingsPopover=nil
-        readerWebView=nil; readerContentView=nil; activeReader=nil; readerTempDirectory=nil
+        readerWebView=nil; readerContentView=nil; activeReader=nil; readerTempDirectory=nil; readerWorkIsPersistentCache=false
         readerChapterMenu=nil; readerFontMenu=nil; readerThemeMenu=nil; readerSpacingMenu=nil; readerSizeLabel=nil; readerProgressSlider=nil; readerProgressLabel=nil; readerPageLabel=nil; readerHighlightButton=nil; readerChapters=[]
         window.contentView=dashboardContentView
         window.title="Shelf"
-        if let directory { DispatchQueue.main.asyncAfter(deadline:.now()+3) { try? FileManager.default.removeItem(at:directory) } }
+        if let directory,removeDirectory { DispatchQueue.main.asyncAfter(deadline:.now()+3) { try? FileManager.default.removeItem(at:directory) } }
     }
 
     private func syncReaderHighlight(_ body:[String:Any]) {

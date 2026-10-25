@@ -141,67 +141,54 @@ def crosspoint_document_metadata():
         return {}
 
 def automatic_book_match(title, author, identities, filename=""):
-    """Match only high-confidence title/filename identities; leave ambiguous books unresolved."""
+    """Always select the strongest candidate when any usable book identity exists."""
     query_values = []
     for value in (title, filename):
         value = str(value or "").strip()
-        if value:
-            stem = os.path.splitext(os.path.basename(value))[0]
-            variants = [stem]
-            if value == filename:
-                variants.extend(re.split(r"\s+(?:[-–—|]+)\s+", stem))
-            for variant in variants:
-                normalized = normalized_title(variant)
-                if len(normalized) >= 4 and normalized not in query_values:
-                    query_values.append(normalized)
+        if not value:
+            continue
+        stem = os.path.splitext(os.path.basename(value))[0]
+        variants = [stem]
+        if value == filename:
+            variants.extend(re.split(r"\s+(?:[-–—|]+)\s+", stem))
+        for variant in variants:
+            normalized = normalized_title(variant)
+            if len(normalized) >= 4 and normalized not in query_values:
+                query_values.append(normalized)
     if not query_values:
         return None
 
     wanted_author = normalized_author(author)
-    exact_ids = set()
-    prefix_ids = set()
+    ranked = []
     for book in identities:
         candidate_title = normalized_title(book["title"])
         candidate_names = {normalized_title(name) for name in book.get("filenames", [])}
-        for wanted in query_values:
-            if wanted == candidate_title or wanted in candidate_names:
-                exact_ids.add(book["id"])
-            elif candidate_title and (candidate_title.startswith(wanted) or wanted.startswith(candidate_title)):
-                prefix_ids.add(book["id"])
-
-    exact = [book for book in identities if book["id"] in exact_ids]
-    if not exact:
-        exact = [book for book in identities if book["id"] in prefix_ids]
-    if wanted_author and exact:
-        author_hits = [book for book in exact
-                       if wanted_author in normalized_author(book["author"])
-                       or normalized_author(book["author"]) in wanted_author]
-        if author_hits:
-            exact = author_hits
-        elif len(exact) > 1:
-            return None
-    if len(exact) == 1:
-        return exact[0]["id"]
-    if exact:
-        return None
-
-    scored = []
-    for book in identities:
-        candidate = normalized_title(book["title"])
-        title_score = max((difflib.SequenceMatcher(None, wanted, candidate).ratio()
+        title_score = max((difflib.SequenceMatcher(None, wanted, candidate_title).ratio()
                            for wanted in query_values), default=0.0)
+        filename_score = max((1.0 if wanted in candidate_names else
+                              difflib.SequenceMatcher(None, wanted, name).ratio()
+                              for wanted in query_values for name in candidate_names), default=0.0)
+        score = max(title_score, filename_score)
+        author_score = 0.0
         if wanted_author:
             author_score = difflib.SequenceMatcher(
                 None, wanted_author, normalized_author(book["author"])
             ).ratio()
-            title_score = title_score * 0.82 + author_score * 0.18
-        scored.append((title_score, book["id"]))
-    scored.sort(reverse=True)
-    threshold = 0.975 if wanted_author else 0.99
-    if scored and scored[0][0] >= threshold and (
-            len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.05):
-        return scored[0][1]
-    return None
+            score = score * 0.82 + author_score * 0.18
+        ranked.append((score, author_score, book))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda row: (row[0], row[1], -row[2]["id"]), reverse=True)
+    best_score, _, best = ranked[0]
+    margin = best_score - (ranked[1][0] if len(ranked) > 1 else 0.0)
+    exact_title = normalized_title(best["title"]) in query_values
+    exact_filename = bool({normalized_title(name) for name in best.get("filenames", [])} & set(query_values))
+    reason = "Exact Calibre filename" if exact_filename else "Exact title" if exact_title else "Best title and author similarity"
+    confidence = max(0.0, min(1.0, best_score))
+    if margin < 0.035:
+        confidence = min(confidence, 0.62)
+        reason = "Best candidate among similarly scored titles"
+    return {"book_id": best["id"], "confidence": round(confidence, 4), "reason": reason}
 
 def redis_book_metadata(key):
     fields = {name: redis("HGET", key, name) for name in ("metadata", "title", "author", "authors", "filename")}
@@ -456,16 +443,22 @@ def main():
                         metadata[field] = stored[field]
                 title = str(metadata.get("title") or "").strip()
                 author = str(metadata.get("author") or metadata.get("authors") or "").strip()
-                if title:
-                    candidate_id = automatic_book_match(title, author, identities, metadata.get("filename"))
+                if title or metadata.get("filename"):
+                    candidate = automatic_book_match(title, author, identities, metadata.get("filename"))
+                    candidate_id = candidate.get("book_id") if candidate else None
                     if candidate_id in book_ids:
                         book_id = candidate_id
                         mapping[digest.lower()] = candidate_id
                         aliases[digest.lower()] = {
                             "book_id": candidate_id,
-                            "reason": "Automatic match from device title metadata",
+                            "reason": candidate["reason"],
+                            "confidence": candidate["confidence"],
+                            "automatic": True,
+                            "source_title": title,
+                            "source_author": author,
+                            "source_filename": str(metadata.get("filename") or ""),
                         }
-                        log(f"AUTO-MATCHED progress md5={digest} book={candidate_id} title={title[:100]}")
+                        log(f"AUTO-MATCHED confidence={candidate['confidence']:.2f} md5={digest} book={candidate_id} title={title[:100]}")
 
             if book_id is None:
                 log(f"UNMATCHED md5={digest} percent={percentage} device={device}")
@@ -546,7 +539,30 @@ def main():
             else:
                 log(f"ERROR partial progress sync book={book_id} md5={digest}")
 
-        write_json_atomic(UNMATCHED, {"generatedAt": int(time.time()), "items": unmatched})
+        review = []
+        identity_by_id = {book["id"]: book for book in identities}
+        for digest, value in aliases.items():
+            if not isinstance(value, dict) or not value.get("automatic"):
+                continue
+            try:
+                confidence = float(value.get("confidence", 1.0))
+                book_id = int(value.get("book_id"))
+            except (TypeError, ValueError):
+                continue
+            if confidence >= 0.82 or book_id not in identity_by_id:
+                continue
+            candidate = identity_by_id[book_id]
+            review.append({
+                "document": digest,
+                "bookId": book_id,
+                "bookTitle": candidate["title"],
+                "bookAuthor": candidate["author"],
+                "confidence": confidence,
+                "sourceTitle": value.get("source_title", ""),
+                "sourceAuthor": value.get("source_author", ""),
+                "sourceFilename": os.path.basename(str(value.get("source_filename", ""))),
+            })
+        write_json_atomic(UNMATCHED, {"generatedAt": int(time.time()), "items": unmatched, "review": review})
 
         log(
             f"BRIDGE END books={len(books)} "
