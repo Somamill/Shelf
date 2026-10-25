@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Reworks the reader controls into a floating, translucent navigation and action layer, with more room for the book page.
+- Adds icons to reader actions and setup sections, and refines the setup layout with lighter spacing and responsive glass surfaces.
+- Raises the outer page edges in the Shelf book mark so the open pages read as lifting upward from the spine.
+- Keeps the reading canvas and text opaque and legible while reserving glass materials for controls and navigation.
+
 ## 0.1.0
 
 - First public release of Shelf under the MIT License.
