@@ -2,6 +2,7 @@
 """Prepare one local Calibre book for the dashboard's built-in reader."""
 
 import hashlib
+import fcntl
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -20,8 +22,96 @@ DB = LIBRARY / 'metadata.db'
 TOOLS = configuration_section('tools')
 CONVERTER = Path(TOOLS.get('calibreApp') or shutil.which('ebook-convert') or '/Applications/calibre.app/Contents/MacOS/ebook-convert').expanduser()
 STATE = configured_path('state', str(BOOKS_ROOT / 'state'))
-WORK_ROOT = STATE / 'dashboard-reader'
+CACHE_ROOT = STATE / 'dashboard-reader-cache'
 ALIASES = STATE / 'kosync-calibre-aliases.json'
+READER_CACHE_VERSION = 2
+
+
+def locate_html(root: Path) -> Path | None:
+    for name in ('index.html', 'index.xhtml'):
+        candidate = root / 'content' / name
+        if candidate.is_file():
+            return candidate
+    return next(iter(sorted((root / 'content').glob('*.html'))), None)
+
+
+def prune_reader_cache(now: float) -> None:
+    """Keep warm books; discard only cache folders unused for 90 days."""
+    try:
+        for entry in CACHE_ROOT.iterdir():
+            if (entry.is_dir() and not entry.name.startswith('.')
+                    and now - entry.stat().st_mtime > 90 * 24 * 60 * 60):
+                shutil.rmtree(entry, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def prepare_reader(source: Path, document: str) -> tuple[Path, Path, bool]:
+    """Convert once per EPUB revision and reuse an atomically published HTML cache."""
+    stat = source.stat()
+    signature = '\n'.join((
+        str(READER_CACHE_VERSION), str(source.resolve()), str(stat.st_size),
+        str(stat.st_mtime_ns), document,
+    ))
+    key = hashlib.sha256(signature.encode('utf-8')).hexdigest()
+    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    cache_dir = CACHE_ROOT / key
+    lock_path = CACHE_ROOT / f'.{key}.lock'
+    with lock_path.open('a+b') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        html = locate_html(cache_dir) if cache_dir.is_dir() else None
+        manifest = cache_dir / '.reader-cache.json'
+        if html and manifest.is_file():
+            try:
+                if json.loads(manifest.read_text(encoding='utf-8')).get('key') == key:
+                    os.utime(cache_dir, None)
+                    return cache_dir, html, True
+            except (OSError, ValueError, TypeError):
+                pass
+
+        if not CONVERTER.is_file():
+            raise FileNotFoundError('Calibre or its ebook converter is unavailable.')
+        staging = Path(tempfile.mkdtemp(prefix=f'.{key}.', dir=CACHE_ROOT))
+        try:
+            archive = staging / 'book.htmlz'
+            result = subprocess.run(
+                [str(CONVERTER), str(source), str(archive)],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
+            )
+            if result.returncode != 0 or not archive.is_file():
+                detail = (result.stderr or result.stdout).strip().splitlines()[-1:]
+                message = 'Calibre could not prepare this book for reading.'
+                if detail:
+                    message += f' {detail[0][:180]}'
+                raise RuntimeError(message)
+
+            extracted = staging / 'content'
+            extracted.mkdir()
+            with zipfile.ZipFile(archive) as bundle:
+                root = extracted.resolve()
+                for entry in bundle.infolist():
+                    target = (extracted / entry.filename).resolve()
+                    if not target.is_relative_to(root):
+                        raise ValueError('The converted book contains an unsafe path.')
+                    bundle.extract(entry, extracted)
+            archive.unlink(missing_ok=True)
+            html = locate_html(staging)
+            if html is None:
+                raise RuntimeError('Calibre produced no readable HTML for this book.')
+            (staging / '.reader-cache.json').write_text(
+                json.dumps({'key': key, 'sourceSize': stat.st_size,
+                            'sourceModifiedNs': stat.st_mtime_ns}),
+                encoding='utf-8',
+            )
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+            os.replace(staging, cache_dir)
+            os.utime(cache_dir, None)
+            prune_reader_cache(time.time())
+            return cache_dir, cache_dir / html.relative_to(staging), False
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
 
 def partial_md5(path: Path) -> str:
@@ -43,7 +133,7 @@ def main() -> None:
     if len(sys.argv) != 2 or not sys.argv[1].isdigit():
         raise ValueError('Choose a book from your Calibre library.')
     book_id = int(sys.argv[1])
-    if not DB.is_file() or not CONVERTER.is_file():
+    if not DB.is_file():
         raise FileNotFoundError('Calibre or its library is unavailable.')
 
     conn = sqlite3.connect(f'file:{DB}?mode=ro', uri=True, timeout=5)
@@ -75,34 +165,8 @@ def main() -> None:
     if source is None:
         raise FileNotFoundError('No readable ebook file was found for this book.')
 
-    # Convert a copy into a private, temporary web view. The Calibre file stays untouched.
-    WORK_ROOT.mkdir(parents=True, exist_ok=True)
-    WORK = Path(tempfile.mkdtemp(prefix=f'book-{book_id}-', dir=WORK_ROOT))
-    archive = WORK / 'book.htmlz'
-    result = subprocess.run(
-        [str(CONVERTER), str(source), str(archive)],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
-    )
-    if result.returncode != 0 or not archive.is_file():
-        detail = (result.stderr or result.stdout).strip().splitlines()[-1:]
-        raise RuntimeError('Calibre could not prepare this book for reading.' + (f' {detail[0][:180]}' if detail else ''))
-
-    extracted = WORK / 'content'
-    extracted.mkdir()
-    with zipfile.ZipFile(archive) as bundle:
-        for entry in bundle.infolist():
-            target = (extracted / entry.filename).resolve()
-            if not target.is_relative_to(extracted.resolve()):
-                raise ValueError('The converted book contains an unsafe path.')
-            bundle.extract(entry, extracted)
-    archive.unlink(missing_ok=True)
-    html = next((path for path in (extracted / 'index.html', extracted / 'index.xhtml') if path.is_file()), None)
-    if html is None:
-        html = next(iter(sorted(extracted.glob('*.html'))), None)
-    if html is None:
-        raise RuntimeError('Calibre produced no readable HTML for this book.')
-
     primary_document = partial_md5(source)
+    reader_directory, html, cache_hit = prepare_reader(source, primary_document)
     sync_documents = [primary_document]
     try:
         stored_aliases = json.loads(ALIASES.read_text(encoding='utf-8'))
@@ -128,7 +192,9 @@ def main() -> None:
         'document': primary_document,
         'syncDocuments': sync_documents,
         'htmlPath': str(html),
-        'workDir': str(WORK),
+        'workDir': str(reader_directory),
+        'persistentCache': True,
+        'cacheHit': cache_hit,
     }, ensure_ascii=False))
 
 

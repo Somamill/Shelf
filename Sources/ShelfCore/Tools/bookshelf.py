@@ -66,9 +66,16 @@ def main():
 
     try:
         with UNMATCHED_FILE.open('r', encoding='utf-8') as source:
-            unmatched = json.load(source).get('items', [])
+            unmatched_data = json.load(source)
+            unmatched = unmatched_data.get('items', [])
+            review_matches = unmatched_data.get('review', [])
+            if not isinstance(unmatched, list):
+                unmatched = []
+            if not isinstance(review_matches, list):
+                review_matches = []
     except (OSError, ValueError, TypeError):
         unmatched = []
+        review_matches = []
 
     print(json.dumps({
         'total': total,
@@ -76,6 +83,7 @@ def main():
         'recent': books[:10],
         'allBooks': books,
         'unmatchedProgress': unmatched,
+        'reviewProgressMatches': review_matches,
         'source': 'Calibre Library',
     }, ensure_ascii=False))
 
