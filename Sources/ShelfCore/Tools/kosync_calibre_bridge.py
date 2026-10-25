@@ -100,6 +100,58 @@ def normalized_author(value):
     tokens = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", str(value or "")).casefold(), re.UNICODE)
     return "".join(sorted(tokens))
 
+def normalized_identifiers(values):
+    """Flatten EPUB/reader identifiers into stable type:value tokens."""
+    if isinstance(values, str):
+        try:
+            decoded = json.loads(values)
+            values = decoded if isinstance(decoded, (dict, list)) else values
+        except (ValueError, TypeError):
+            pass
+    pairs = []
+    def collect(key, value):
+        if isinstance(value, dict):
+            identifier_type = value.get("type") or value.get("scheme") or value.get("identifierType")
+            identifier_value = value.get("value") or value.get("identifier")
+            if identifier_type and identifier_value:
+                pairs.append((str(identifier_type), identifier_value))
+                return
+            for child_key, child_value in value.items():
+                collect(child_key, child_value)
+        elif isinstance(value, list):
+            for child in value:
+                collect(key, child)
+        elif isinstance(value, str) and key in (None, "") and ":" in value:
+            child_key, child_value = value.split(":", 1)
+            pairs.append((child_key, child_value))
+        elif key not in (None, ""):
+            pairs.append((str(key), value))
+    collect(None, values)
+    result = set()
+    for key, value in pairs:
+        if isinstance(value, (dict, list)):
+            continue
+        kind = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+        raw = str(value or "").casefold()
+        compact = re.sub(r"[^a-z0-9x]", "", raw)
+        if not compact:
+            continue
+        isbn_match = re.search(r"(?:urn:)?isbn[:/]([0-9xX-]{10,17})", raw)
+        isbn = re.sub(r"[^0-9x]", "", (isbn_match.group(1) if isbn_match else raw).casefold())
+        isbn_valid = False
+        if len(isbn) == 10 and re.fullmatch(r"\d{9}[\dx]", isbn):
+            checksum = sum((10 - index) * (10 if char == "x" else int(char)) for index, char in enumerate(isbn))
+            isbn_valid = checksum % 11 == 0
+        elif len(isbn) == 13 and isbn.isdigit():
+            checksum = sum(int(char) * (1 if index % 2 == 0 else 3) for index, char in enumerate(isbn))
+            isbn_valid = checksum % 10 == 0
+        if isbn_valid:
+            result.add(f"isbn:{isbn}")
+        if kind in {"isbn", "isbn10", "isbn13"}:
+            kind = "isbn"
+        result.add(f"{kind}:{compact}")
+    return result
+
 def local_book_identities():
     conn = sqlite3.connect(f"file:{METADATA_DB}?mode=ro", uri=True, timeout=10)
     try:
@@ -109,7 +161,10 @@ def local_book_identities():
                                FROM books_authors_link l JOIN authors a ON a.id=l.author
                               WHERE l.book=b.id), ''),
                    COALESCE((SELECT group_concat(d.name || '.' || lower(d.format), char(31))
-                               FROM data d WHERE d.book=b.id), '')
+                               FROM data d WHERE d.book=b.id), ''),
+                   COALESCE((SELECT group_concat(i.type || ':' || i.val, char(31))
+                               FROM identifiers i WHERE i.book=b.id), ''),
+                   COALESCE(b.uuid, '')
               FROM books b
              ORDER BY b.id
         """).fetchall()
@@ -120,7 +175,8 @@ def local_book_identities():
         "title": title or "",
         "author": author or "",
         "filenames": [name for name in (filenames or "").split(chr(31)) if name],
-    } for book_id, title, author, filenames in rows]
+        "identifiers": normalized_identifiers(identifiers) | normalized_identifiers({"uuid": book_uuid}),
+    } for book_id, title, author, filenames, identifiers, book_uuid in rows]
 
 def crosspoint_document_metadata():
     if not os.path.isfile(CROSSPOINT_DB):
@@ -141,8 +197,15 @@ def crosspoint_document_metadata():
         log(f"WARNING could not read device title metadata: {type(e).__name__}")
         return {}
 
-def automatic_book_match(title, author, identities, filename=""):
+def automatic_book_match(title, author, identities, filename="", identifiers=None):
     """Return a ranked suggestion only when identity evidence is meaningful."""
+    wanted_identifiers = normalized_identifiers(identifiers)
+    if wanted_identifiers:
+        identifier_matches = [book for book in identities
+                              if wanted_identifiers & set(book.get("identifiers", []))]
+        if len(identifier_matches) == 1:
+            return {"book_id": identifier_matches[0]["id"], "confidence": 1.0,
+                    "reason": "Exact embedded book identifier"}
     query_values = []
     for value in (title, filename):
         value = str(value or "").strip()
@@ -455,7 +518,7 @@ def main():
             if book_id is None:
                 metadata = redis_book_metadata(key)
                 stored = remote_metadata.get(digest.lower(), {})
-                for field in ("title", "author", "authors", "filename"):
+                for field in ("title", "author", "authors", "filename", "identifiers", "identifier", "isbn", "uuid"):
                     if not metadata.get(field) and stored.get(field):
                         metadata[field] = stored[field]
                 title = str(metadata.get("title") or (old_suggestion or {}).get("source_title") or "").strip()
@@ -463,8 +526,14 @@ def main():
                 filename = str(metadata.get("filename") or stored.get("filename") or (old_suggestion or {}).get("source_filename") or "").strip()
                 if old_suggestion:
                     suggestion = {"book_id": int(old_suggestion["book_id"]), "confidence": float(old_suggestion.get("confidence", 0))}
-                if title or metadata.get("filename"):
-                    candidate = automatic_book_match(title, author, identities, metadata.get("filename"))
+                if (title or metadata.get("filename") or metadata.get("identifiers")
+                        or metadata.get("identifier") or metadata.get("isbn") or metadata.get("uuid")):
+                    candidate = automatic_book_match(
+                        title, author, identities, metadata.get("filename"),
+                        metadata.get("identifiers") or metadata.get("identifier") or
+                        ({"isbn": metadata.get("isbn")} if metadata.get("isbn") else
+                         {"uuid": metadata.get("uuid")} if metadata.get("uuid") else None),
+                    )
                     candidate_id = candidate.get("book_id") if candidate and candidate.get("confidence", 0) >= 0.82 else None
                     if candidate_id in book_ids:
                         book_id = candidate_id
