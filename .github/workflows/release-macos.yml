@@ -24,6 +24,7 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
       - name: Check Apple signing secrets
+        id: signing-check
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -31,17 +32,24 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
+          missing=()
           for name in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "Missing required GitHub Actions secret: $name" >&2
-              exit 1
-            fi
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
           done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Signed release skipped::Source release is available; configure Apple signing secrets to attach a notarized app. Missing: ${missing[*]}"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install XcodeGen
+        if: steps.signing-check.outputs.available == 'true'
         run: brew install xcodegen
       - name: Generate Xcode project
+        if: steps.signing-check.outputs.available == 'true'
         run: xcodegen generate --spec project.yml --project .
       - name: Import Developer ID certificate
+        if: steps.signing-check.outputs.available == 'true'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -57,6 +65,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
       - name: Archive signed app
+        if: steps.signing-check.outputs.available == 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -68,6 +77,7 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             ENABLE_HARDENED_RUNTIME=YES archive
       - name: Notarize and staple app
+        if: steps.signing-check.outputs.available == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -81,6 +91,7 @@ jobs:
           spctl --assess --type execute --verbose "$APP_PATH"
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip"
       - name: Attach notarized app to GitHub release
+        if: steps.signing-check.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

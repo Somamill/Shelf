@@ -103,16 +103,23 @@ def local_book_identities():
     conn = sqlite3.connect(f"file:{METADATA_DB}?mode=ro", uri=True, timeout=10)
     try:
         rows = conn.execute("""
-            SELECT b.id, b.title, COALESCE(group_concat(a.name, ' '), '')
+            SELECT b.id, b.title,
+                   COALESCE((SELECT group_concat(a.name, ' ')
+                               FROM books_authors_link l JOIN authors a ON a.id=l.author
+                              WHERE l.book=b.id), ''),
+                   COALESCE((SELECT group_concat(d.name || '.' || lower(d.format), char(31))
+                               FROM data d WHERE d.book=b.id), '')
               FROM books b
-              LEFT JOIN books_authors_link l ON l.book=b.id
-              LEFT JOIN authors a ON a.id=l.author
-             GROUP BY b.id, b.title
+             ORDER BY b.id
         """).fetchall()
     finally:
         conn.close()
-    return [{"id": int(book_id), "title": title or "", "author": author or ""}
-            for book_id, title, author in rows]
+    return [{
+        "id": int(book_id),
+        "title": title or "",
+        "author": author or "",
+        "filenames": [name for name in (filenames or "").split(chr(31)) if name],
+    } for book_id, title, author, filenames in rows]
 
 def crosspoint_document_metadata():
     if not os.path.isfile(CROSSPOINT_DB):
@@ -133,37 +140,66 @@ def crosspoint_document_metadata():
         log(f"WARNING could not read device title metadata: {type(e).__name__}")
         return {}
 
-def automatic_book_match(title, author, identities):
-    wanted = normalized_title(title)
-    if len(wanted) < 4:
+def automatic_book_match(title, author, identities, filename=""):
+    """Match only high-confidence title/filename identities; leave ambiguous books unresolved."""
+    query_values = []
+    for value in (title, filename):
+        value = str(value or "").strip()
+        if value:
+            stem = os.path.splitext(os.path.basename(value))[0]
+            variants = [stem]
+            if value == filename:
+                variants.extend(re.split(r"\s+(?:[-–—|]+)\s+", stem))
+            for variant in variants:
+                normalized = normalized_title(variant)
+                if len(normalized) >= 4 and normalized not in query_values:
+                    query_values.append(normalized)
+    if not query_values:
         return None
+
     wanted_author = normalized_author(author)
-    exact = [book for book in identities if normalized_title(book["title"]) == wanted]
+    exact_ids = set()
+    prefix_ids = set()
+    for book in identities:
+        candidate_title = normalized_title(book["title"])
+        candidate_names = {normalized_title(name) for name in book.get("filenames", [])}
+        for wanted in query_values:
+            if wanted == candidate_title or wanted in candidate_names:
+                exact_ids.add(book["id"])
+            elif candidate_title and (candidate_title.startswith(wanted) or wanted.startswith(candidate_title)):
+                prefix_ids.add(book["id"])
+
+    exact = [book for book in identities if book["id"] in exact_ids]
     if not exact:
-        exact = [book for book in identities
-                 if normalized_title(book["title"]).startswith(wanted)
-                 or wanted.startswith(normalized_title(book["title"]))]
-    if wanted_author:
+        exact = [book for book in identities if book["id"] in prefix_ids]
+    if wanted_author and exact:
         author_hits = [book for book in exact
                        if wanted_author in normalized_author(book["author"])
                        or normalized_author(book["author"]) in wanted_author]
         if author_hits:
             exact = author_hits
-        elif exact and len({normalized_author(book["author"]) for book in exact}) > 1:
+        elif len(exact) > 1:
             return None
-    if exact and len({normalized_title(book["title"]) for book in exact}) == 1 and len({normalized_author(book["author"]) for book in exact}) <= 1:
+    if len(exact) == 1:
         return exact[0]["id"]
+    if exact:
+        return None
 
     scored = []
     for book in identities:
         candidate = normalized_title(book["title"])
-        ratio = difflib.SequenceMatcher(None, wanted, candidate).ratio() if candidate else 0
+        title_score = max((difflib.SequenceMatcher(None, wanted, candidate).ratio()
+                           for wanted in query_values), default=0.0)
         if wanted_author:
-            author_ratio = difflib.SequenceMatcher(None, wanted_author, normalized_author(book["author"])).ratio()
-            ratio = ratio * 0.78 + author_ratio * 0.22
-        scored.append((ratio, book["id"]))
+            author_score = difflib.SequenceMatcher(
+                None, wanted_author, normalized_author(book["author"])
+            ).ratio()
+            title_score = title_score * 0.82 + author_score * 0.18
+        scored.append((title_score, book["id"]))
     scored.sort(reverse=True)
-    if scored and scored[0][0] >= (0.97 if wanted_author else 0.985) and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.04):
+    threshold = 0.975 if wanted_author else 0.99
+    if scored and scored[0][0] >= threshold and (
+            len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.05):
         return scored[0][1]
     return None
 
@@ -421,7 +457,7 @@ def main():
                 title = str(metadata.get("title") or "").strip()
                 author = str(metadata.get("author") or metadata.get("authors") or "").strip()
                 if title:
-                    candidate_id = automatic_book_match(title, author, identities)
+                    candidate_id = automatic_book_match(title, author, identities, metadata.get("filename"))
                     if candidate_id in book_ids:
                         book_id = candidate_id
                         mapping[digest.lower()] = candidate_id
@@ -444,6 +480,9 @@ def main():
                         item["title"] = title
                     if author:
                         item["author"] = author
+                    filename = str(metadata.get("filename") or stored.get("filename") or "").strip()
+                    if filename:
+                        item["filename"] = os.path.basename(filename)
                     unmatched.append(item)
                 except (TypeError, ValueError):
                     pass

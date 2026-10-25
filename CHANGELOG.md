@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Adds horizontal page turns by touch swipe and trackpad gestures while keeping keyboard and button navigation available.
+- Improves EPUB table-of-contents extraction, chapter navigation, and paginated column counting to prevent extra blank pages.
+- Expands automatic KOReader matching to exact Calibre file names as well as title metadata, while keeping ambiguous matches unresolved.
+- Makes the signed-release workflow skip cleanly with a notice when Apple signing credentials are not configured.
+
 ## 0.1.1
 
 - Reworks the reader controls into a floating, translucent navigation and action layer, with more room for the book page.
