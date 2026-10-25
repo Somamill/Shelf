@@ -26,41 +26,47 @@ for (pixels, filename) in variants {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
     let size = CGFloat(pixels)
-    NSColor(calibratedRed: 0.97, green: 0.97, blue: 0.955, alpha: 1).setFill()
+    NSColor(calibratedRed: 0.14, green: 0.22, blue: 0.24, alpha: 1).setFill()
     NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: size, height: size),
                  xRadius: size * 0.23, yRadius: size * 0.23).fill()
 
-    let ink = NSColor(calibratedRed: 0.48, green: 0.48, blue: 0.49, alpha: 1)
-    let line = max(1.0, size * 0.029)
+    let paper = NSColor(calibratedRed: 0.96, green: 0.945, blue: 0.90, alpha: 1)
+    let accent = NSColor(calibratedRed: 0.39, green: 0.69, blue: 0.63, alpha: 1)
     let left = NSBezierPath()
-    left.lineWidth = line
-    left.lineCapStyle = .round
-    left.lineJoinStyle = .round
-    left.move(to: point(0.485, 0.68, size))
-    left.curve(to: point(0.22, 0.63, size), controlPoint1: point(0.38, 0.67, size), controlPoint2: point(0.29, 0.63, size))
-    left.line(to: point(0.22, 0.34, size))
-    left.curve(to: point(0.485, 0.40, size), controlPoint1: point(0.30, 0.38, size), controlPoint2: point(0.40, 0.39, size))
-    ink.setStroke()
-    left.stroke()
+    left.move(to: point(0.49, 0.63, size))
+    left.curve(to: point(0.20, 0.70, size), controlPoint1: point(0.39, 0.66, size), controlPoint2: point(0.28, 0.70, size))
+    left.line(to: point(0.20, 0.34, size))
+    left.curve(to: point(0.49, 0.39, size), controlPoint1: point(0.30, 0.34, size), controlPoint2: point(0.41, 0.38, size))
+    left.close()
+    paper.setFill()
+    left.fill()
 
     let right = NSBezierPath()
-    right.lineWidth = line
-    right.lineCapStyle = .round
-    right.lineJoinStyle = .round
-    right.move(to: point(0.515, 0.68, size))
-    right.curve(to: point(0.78, 0.63, size), controlPoint1: point(0.62, 0.67, size), controlPoint2: point(0.71, 0.63, size))
-    right.line(to: point(0.78, 0.34, size))
-    right.curve(to: point(0.515, 0.40, size), controlPoint1: point(0.70, 0.38, size), controlPoint2: point(0.60, 0.39, size))
-    ink.setStroke()
-    right.stroke()
+    right.move(to: point(0.51, 0.63, size))
+    right.curve(to: point(0.80, 0.70, size), controlPoint1: point(0.61, 0.66, size), controlPoint2: point(0.72, 0.70, size))
+    right.line(to: point(0.80, 0.34, size))
+    right.curve(to: point(0.51, 0.39, size), controlPoint1: point(0.70, 0.34, size), controlPoint2: point(0.59, 0.38, size))
+    right.close()
+    paper.setFill()
+    right.fill()
 
     let spine = NSBezierPath()
-    spine.lineWidth = max(1, size * 0.026)
+    spine.lineWidth = max(1, size * 0.018)
     spine.lineCapStyle = .round
     spine.move(to: point(0.5, 0.405, size))
-    spine.line(to: point(0.5, 0.675, size))
-    ink.setStroke()
+    spine.line(to: point(0.5, 0.625, size))
+    NSColor(calibratedRed: 0.14, green: 0.22, blue: 0.24, alpha: 1).setStroke()
     spine.stroke()
+
+    let pageLines = NSBezierPath()
+    pageLines.lineWidth = max(1, size * 0.012)
+    pageLines.lineCapStyle = .round
+    pageLines.move(to: point(0.265, 0.59, size)); pageLines.line(to: point(0.425, 0.55, size))
+    pageLines.move(to: point(0.265, 0.52, size)); pageLines.line(to: point(0.425, 0.49, size))
+    pageLines.move(to: point(0.575, 0.55, size)); pageLines.line(to: point(0.735, 0.59, size))
+    pageLines.move(to: point(0.575, 0.49, size)); pageLines.line(to: point(0.735, 0.52, size))
+    accent.setStroke()
+    pageLines.stroke()
 
     NSGraphicsContext.restoreGraphicsState()
     guard let png = bitmap.representation(using: .png, properties: [:]) else {

@@ -115,6 +115,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerSizeLabel:NSTextField?
     private var readerProgressSlider:NSSlider?
     private var readerProgressLabel:NSTextField?
+    private var readerSettingsPopover:NSPopover?
     private var readerChapters:[[String:Any]]=[]
     private var readerFontSize:Double=19
     private var readerFontChoice="sans"
@@ -572,7 +573,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               window.readerBook=\(source);
               const style=document.createElement('style');
               style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:54px 280px;column-width:790px!important;column-gap:560px!important;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
-              let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,allowProgressSync=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
+              let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
               window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd']};const palette=themes[p.theme]||themes.paper;const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
               let titleKey=(window.readerBook.title||'').trim().toLocaleLowerCase();
               let headings=Array.from(document.querySelectorAll('.p-toc a[href^="#"]')).map(a=>{try{return document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)))}catch(_){return null}}).filter(Boolean);
@@ -585,15 +586,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               function chapterIndex(){let result=0,scroll=readerViewport?readerViewport.scrollLeft:0;for(let n=0;n<headings.length;n++){const x=headings[n].getBoundingClientRect().left+scroll;if(x<=scroll+step()*.42)result=n;else break;}return result;}
               function percentage(){return pageCount<=1?0:currentPage/(pageCount-1)}
               function sendPosition(){if(!readerViewport)return;layoutPages();const c=chapterIndex();lastCandidate=percentage();window.webkit.messageHandlers.reader.postMessage({type:'position',percentage:lastCandidate,chapter:c,chapterTitle:window.readerChapters[c]?.title||'',page:currentPage+1,pages:pageCount})}
-              function setPage(page,userAction){if(!readerViewport)return;layoutPages();currentPage=Math.max(0,Math.min(pageCount-1,Math.round(page)));if(userAction)allowProgressSync=true;readerViewport.scrollTo({left:currentPage*(step()+88),behavior:'smooth'});window.setTimeout(sendPosition,240);if(userAction)window.setTimeout(window.syncReaderProgress,320)}
+              function setPage(page,userAction){if(!readerViewport)return;layoutPages();currentPage=Math.max(0,Math.min(pageCount-1,Math.round(page)));if(userAction)allowProgressSync=true;readerViewport.scrollTo({left:currentPage*step(),behavior:'smooth'});window.setTimeout(sendPosition,240);if(userAction)window.setTimeout(window.syncReaderProgress,320)}
               window.readerPage=function(offset){setPage(currentPage+Number(offset||0),true)};
-              window.readerGoTo=function(index){const h=headings[Math.max(0,Math.min(headings.length-1,Number(index)||0))];if(h){const x=h.getBoundingClientRect().left+readerViewport.scrollLeft;setPage(Math.round(x/(step()+88)),true)}};
+              window.readerGoTo=function(index){const h=headings[Math.max(0,Math.min(headings.length-1,Number(index)||0))];if(h){const x=h.getBoundingClientRect().left+readerViewport.scrollLeft;setPage(Math.round(x/step()),true)}};
               window.readerScrollTo=function(p){setPage(Math.round((pageCount-1)*Math.max(0,Math.min(1,Number(p)||0))),true)};
               window.captureReaderHighlight=function(){const selection=window.getSelection(),text=(selection?.toString()||'').trim();if(!text){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'Select a passage first, then choose Highlight.'});return}if(text.length>4096){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'That passage is too long to save as one highlight.'});return}const c=chapterIndex();window.webkit.messageHandlers.reader.postMessage({type:'highlight',text:text,chapter:window.readerChapters[c]?.title||'',page:currentPage+1,percentage:percentage()})};
-              function setupPages(){readerViewport=document.createElement('main');readerViewport.id='reader-viewport';readerFlow=document.createElement('article');readerFlow.id='reader-flow';while(document.body.firstChild)readerFlow.appendChild(document.body.firstChild);readerViewport.appendChild(readerFlow);document.body.appendChild(readerViewport);readerViewport.addEventListener('scroll',()=>{const stepSize=step()+88;currentPage=Math.max(0,Math.min(pageCount-1,Math.round(readerViewport.scrollLeft/stepSize)));if(Date.now()-lastPositionSent>160){lastPositionSent=Date.now();sendPosition()}if(allowProgressSync)window.syncReaderProgress()},{passive:true});window.addEventListener('resize',()=>{const p=percentage();layoutPages();setPage(Math.round(p*(pageCount-1)),false)});}
-              window.readerAckProgress=function(p){lastSent=Number(p)};
-              window.syncReaderProgress=function(){if(!allowProgressSync)return;lastCandidate=percentage();if(lastSent>=0&&Math.abs(lastCandidate-lastSent)<0.004)return;window.webkit.messageHandlers.reader.postMessage({type:'progress',bookId:window.readerBook.bookId,document:window.readerBook.document,syncDocuments:window.readerBook.syncDocuments,percentage:lastCandidate,progress:lastCandidate.toFixed(6),metadata:{title:window.readerBook.title,authors:window.readerBook.authors,filename:window.readerBook.filename,language:window.readerBook.language}})};
-              function resume(){const p=Number(window.readerBook.resumePercentage||0);layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*(step()+88);lastSent=p;lastCandidate=p;sendPosition();window.webkit.messageHandlers.reader.postMessage({type:'chapters',chapters:window.readerChapters})}
+              function setupPages(){readerViewport=document.createElement('main');readerViewport.id='reader-viewport';readerFlow=document.createElement('article');readerFlow.id='reader-flow';while(document.body.firstChild)readerFlow.appendChild(document.body.firstChild);readerViewport.appendChild(readerFlow);document.body.appendChild(readerViewport);const userRead=()=>{allowProgressSync=true};readerViewport.addEventListener('wheel',userRead,{passive:true});readerViewport.addEventListener('touchstart',userRead,{passive:true});readerViewport.addEventListener('pointerdown',userRead,{passive:true});readerViewport.addEventListener('scroll',()=>{currentPage=Math.max(0,Math.min(pageCount-1,Math.round(readerViewport.scrollLeft/step())));if(Date.now()-lastPositionSent>160){lastPositionSent=Date.now();sendPosition()}if(allowProgressSync)window.syncReaderProgress()},{passive:true});window.addEventListener('resize',()=>{const p=percentage();layoutPages();setPage(Math.round(p*(pageCount-1)),false)});}
+              window.readerAckProgress=function(p){lastSent=Number(p);progressSyncPending=false;if(Math.abs(percentage()-lastSent)>=0.004)setTimeout(window.syncReaderProgress,350)};
+              window.readerFailProgress=function(){progressSyncPending=false};
+              window.syncReaderProgress=function(){if(!allowProgressSync||progressSyncPending)return;lastCandidate=percentage();if(lastSent>=0&&Math.abs(lastCandidate-lastSent)<0.004)return;if(Date.now()-lastProgressAttempt<1500)return;lastProgressAttempt=Date.now();progressSyncPending=true;window.webkit.messageHandlers.reader.postMessage({type:'progress',bookId:window.readerBook.bookId,document:window.readerBook.document,syncDocuments:window.readerBook.syncDocuments,percentage:lastCandidate,progress:lastCandidate.toFixed(6),metadata:{title:window.readerBook.title,authors:window.readerBook.authors,filename:window.readerBook.filename,language:window.readerBook.language}})};
+              function resume(){const p=Number(window.readerBook.resumePercentage||0);layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*step();lastSent=p;lastCandidate=p;sendPosition();window.webkit.messageHandlers.reader.postMessage({type:'chapters',chapters:window.readerChapters})}
               window.addEventListener('load',()=>{setupPages();window.readerApplyPreferences({font:'\(font)',theme:'\(theme)',spacing:'\(spacing)',size:\(readerFontSize)});setTimeout(resume,140)});
               window.addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();window.readerPage(1)}else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();window.readerPage(-1)}else if(e.key==='Home'){e.preventDefault();setPage(0,true)}else if(e.key==='End'){e.preventDefault();setPage(pageCount-1,true)}});
               window.addEventListener('pagehide',window.syncReaderProgress);window.addEventListener('beforeunload',window.syncReaderProgress);setInterval(window.syncReaderProgress,15000);
@@ -605,11 +607,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         web.onEPUBDrop = { [weak self] urls in self?.queueEPUBImports(urls) }
         web.navigationDelegate=self
         let container=NSView(frame:.zero)
-        let toolbar=makeReaderToolbar()
+        let toolbar=makeReaderToolbar(title:title,author:readerData["authors"] as? String ?? "")
         container.addSubview(toolbar); container.addSubview(web)
         for view in [toolbar,web] { view.translatesAutoresizingMaskIntoConstraints=false }
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo:container.topAnchor),toolbar.leadingAnchor.constraint(equalTo:container.leadingAnchor),toolbar.trailingAnchor.constraint(equalTo:container.trailingAnchor),toolbar.heightAnchor.constraint(equalToConstant:92),
+            toolbar.topAnchor.constraint(equalTo:container.topAnchor),toolbar.leadingAnchor.constraint(equalTo:container.leadingAnchor),toolbar.trailingAnchor.constraint(equalTo:container.trailingAnchor),toolbar.heightAnchor.constraint(equalToConstant:88),
             web.topAnchor.constraint(equalTo:toolbar.bottomAnchor),web.leadingAnchor.constraint(equalTo:container.leadingAnchor),web.trailingAnchor.constraint(equalTo:container.trailingAnchor),web.bottomAnchor.constraint(equalTo:container.bottomAnchor)
         ])
         if dashboardContentView == nil { dashboardContentView=window.contentView }
@@ -623,33 +625,61 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         if let previous,previous != workDirectory { DispatchQueue.main.asyncAfter(deadline:.now()+2) { try? FileManager.default.removeItem(at:previous) } }
     }
 
-    private func makeReaderToolbar()->NSView {
+    private func makeReaderToolbar(title:String,author:String)->NSView {
         let toolbar=NSView(frame:.zero)
         toolbar.wantsLayer=true
         toolbar.layer?.backgroundColor=NSColor.windowBackgroundColor.cgColor
-        let back=NSButton(title:"‹ Library",target:self,action:#selector(closeReader))
-        let previous=NSButton(title:"‹",target:self,action:#selector(readerPreviousPage))
-        let next=NSButton(title:"›",target:self,action:#selector(readerNextPage))
-        let chapter=NSPopUpButton(frame:.zero,pullsDown:false); chapter.addItem(withTitle:"Contents"); chapter.target=self; chapter.action=#selector(readerSelectChapter(_:)); chapter.cell?.lineBreakMode = .byTruncatingTail; chapter.setContentHuggingPriority(.defaultLow,for:.horizontal); chapter.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); chapter.widthAnchor.constraint(equalToConstant:280).isActive=true; readerChapterMenu=chapter
-        let font=NSPopUpButton(frame:.zero,pullsDown:false); font.addItems(withTitles:["Noto Sans","Noto Serif","System"]); font.target=self; font.action=#selector(readerSelectFont(_:)); font.widthAnchor.constraint(equalToConstant:112).isActive=true; font.selectItem(at:["sans","serif","system"].firstIndex(of:readerFontChoice) ?? 0); readerFontMenu=font
-        let theme=NSPopUpButton(frame:.zero,pullsDown:false); theme.addItems(withTitles:["Light","Paper","Night"]); theme.target=self; theme.action=#selector(readerSelectTheme(_:)); theme.widthAnchor.constraint(equalToConstant:90).isActive=true; theme.selectItem(at:["light","paper","night"].firstIndex(of:UserDefaults.standard.string(forKey:"readerTheme") ?? "paper") ?? 1); readerThemeMenu=theme
-        let minus=NSButton(title:"−",target:self,action:#selector(readerDecreaseText)); minus.widthAnchor.constraint(equalToConstant:30).isActive=true
-        let plus=NSButton(title:"+",target:self,action:#selector(readerIncreaseText)); plus.widthAnchor.constraint(equalToConstant:30).isActive=true
-        let size=NSTextField(labelWithString:"19 pt"); size.alignment = .center; size.widthAnchor.constraint(equalToConstant:44).isActive=true; readerSizeLabel=size
-        let pages=NSTextField(labelWithString:"Page 1 of 1"); pages.alignment = .center; pages.textColor = .secondaryLabelColor; pages.widthAnchor.constraint(equalToConstant:90).isActive=true; readerPageLabel=pages
-        let highlight=NSButton(title:"Highlight",target:self,action:#selector(readerHighlight)); highlight.bezelStyle = .rounded; highlight.controlSize = .small; readerHighlightButton=highlight
-        let first=NSStackView(views:[back,previous,pages,chapter,next,theme]); first.orientation = .horizontal; first.alignment = .centerY; first.distribution = .fill; first.spacing=8
-        let spacing=NSPopUpButton(frame:.zero,pullsDown:false); spacing.addItems(withTitles:["Compact spacing","Normal spacing","Relaxed spacing"]); spacing.target=self; spacing.action=#selector(readerSelectSpacing(_:)); spacing.widthAnchor.constraint(equalToConstant:155).isActive=true; spacing.selectItem(at:["compact","normal","relaxed"].firstIndex(of:UserDefaults.standard.string(forKey:"readerSpacing") ?? "relaxed") ?? 2); readerSpacingMenu=spacing
-        let slider=NSSlider(value:0,minValue:0,maxValue:1,target:self,action:#selector(readerProgressChanged(_:))); slider.isContinuous=false; slider.setContentHuggingPriority(.defaultLow,for:.horizontal); slider.widthAnchor.constraint(greaterThanOrEqualToConstant:180).isActive=true; readerProgressSlider=slider
-        let progress=NSTextField(labelWithString:"0%"); progress.alignment = .right; progress.widthAnchor.constraint(equalToConstant:48).isActive=true; readerProgressLabel=progress
-        let progressTitle=NSTextField(labelWithString:"Reading position"); progressTitle.textColor = .secondaryLabelColor
-        let second=NSStackView(views:[font,minus,size,plus,spacing,highlight,progressTitle,slider,progress]); second.orientation = .horizontal; second.alignment = .centerY; second.distribution = .fill; second.spacing=9
-        let rows=NSStackView(views:[first,second]); rows.orientation = .vertical; rows.alignment = .leading; rows.distribution = .fillEqually; rows.spacing=4; rows.translatesAutoresizingMaskIntoConstraints=false
-        toolbar.addSubview(rows)
-        NSLayoutConstraint.activate([rows.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:15),rows.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor,constant:-15),rows.centerYAnchor.constraint(equalTo:toolbar.centerYAnchor),first.widthAnchor.constraint(equalTo:rows.widthAnchor),second.widthAnchor.constraint(equalTo:rows.widthAnchor)])
-        [previous,next,minus,plus].forEach { $0.bezelStyle = .rounded; $0.controlSize = .small }
-        [chapter,font,theme,spacing].forEach { $0.controlSize = .small }
+        let back=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Back to library")!,target:self,action:#selector(closeReader))
+        back.isBordered=false; back.toolTip="Back to library"; back.setContentHuggingPriority(.required,for:.horizontal)
+        let titleLabel=NSTextField(labelWithString:title)
+        titleLabel.font = .systemFont(ofSize:13,weight:.semibold); titleLabel.lineBreakMode = .byTruncatingTail
+        let authorLabel=NSTextField(labelWithString:author.isEmpty ? "Now reading" : author)
+        authorLabel.font = .systemFont(ofSize:11); authorLabel.textColor = .secondaryLabelColor; authorLabel.lineBreakMode = .byTruncatingTail
+        let titleStack=NSStackView(views:[titleLabel,authorLabel]); titleStack.orientation = .vertical; titleStack.alignment = .leading; titleStack.distribution = .fillEqually; titleStack.spacing=0
+        titleStack.setContentHuggingPriority(.defaultLow,for:.horizontal); titleStack.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        let chapter=NSPopUpButton(frame:.zero,pullsDown:false); chapter.addItem(withTitle:"Contents"); chapter.target=self; chapter.action=#selector(readerSelectChapter(_:)); chapter.cell?.lineBreakMode = .byTruncatingTail; chapter.widthAnchor.constraint(equalToConstant:190).isActive=true; chapter.controlSize = .small; readerChapterMenu=chapter
+        let highlight=NSButton(title:"Highlight",target:self,action:#selector(readerHighlight)); highlight.bezelStyle = .rounded; highlight.controlSize = .small; highlight.toolTip="Save the selected passage"; readerHighlightButton=highlight
+        let appearance=NSButton(title:"Aa",target:self,action:#selector(showReaderAppearance(_:))); appearance.bezelStyle = .rounded; appearance.controlSize = .small; appearance.font = .systemFont(ofSize:13,weight:.medium); appearance.toolTip="Reading appearance"
+        let top=NSStackView(views:[back,titleStack,chapter,highlight,appearance]); top.orientation = .horizontal; top.alignment = .centerY; top.distribution = .fill; top.spacing=14; top.translatesAutoresizingMaskIntoConstraints=false
+
+        let previous=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Previous page")!,target:self,action:#selector(readerPreviousPage))
+        let next=NSButton(image:NSImage(systemSymbolName:"chevron.right",accessibilityDescription:"Next page")!,target:self,action:#selector(readerNextPage))
+        [previous,next].forEach { $0.isBordered=false; $0.controlSize = .small }
+        let slider=NSSlider(value:0,minValue:0,maxValue:1,target:self,action:#selector(readerProgressChanged(_:))); slider.isContinuous=false; slider.setContentHuggingPriority(.defaultLow,for:.horizontal); readerProgressSlider=slider
+        let pages=NSTextField(labelWithString:"1 / 1"); pages.alignment = .center; pages.textColor = .secondaryLabelColor; pages.font = .monospacedDigitSystemFont(ofSize:11,weight:.regular); pages.widthAnchor.constraint(equalToConstant:62).isActive=true; readerPageLabel=pages
+        let progress=NSTextField(labelWithString:"0%"); progress.alignment = .right; progress.textColor = .secondaryLabelColor; progress.font = .monospacedDigitSystemFont(ofSize:11,weight:.regular); progress.widthAnchor.constraint(equalToConstant:38).isActive=true; readerProgressLabel=progress
+        let bottom=NSStackView(views:[previous,slider,pages,next,progress]); bottom.orientation = .horizontal; bottom.alignment = .centerY; bottom.distribution = .fill; bottom.spacing=10; bottom.translatesAutoresizingMaskIntoConstraints=false
+        let divider=NSBox(); divider.boxType = .separator; divider.translatesAutoresizingMaskIntoConstraints=false
+        toolbar.addSubview(top); toolbar.addSubview(bottom); toolbar.addSubview(divider)
+        NSLayoutConstraint.activate([
+            top.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:24),top.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor,constant:-24),top.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:9),top.heightAnchor.constraint(equalToConstant:32),
+            divider.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor),divider.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor),divider.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:48),
+            bottom.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:24),bottom.trailingAnchor.constraint(equalTo:toolbar.trailingAnchor,constant:-24),bottom.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:56),bottom.heightAnchor.constraint(equalToConstant:20)
+        ])
         return toolbar
+    }
+
+    @objc private func showReaderAppearance(_ sender:NSButton) {
+        if let shown=readerSettingsPopover,shown.isShown { shown.performClose(sender); return }
+        let font=NSPopUpButton(frame:.zero,pullsDown:false); font.addItems(withTitles:["Noto Sans","Noto Serif","System"]); font.target=self; font.action=#selector(readerSelectFont(_:)); font.selectItem(at:["sans","serif","system"].firstIndex(of:readerFontChoice) ?? 0); font.widthAnchor.constraint(equalToConstant:156).isActive=true; font.controlSize = .small; readerFontMenu=font
+        let theme=NSPopUpButton(frame:.zero,pullsDown:false); theme.addItems(withTitles:["Light","Paper","Night"]); theme.target=self; theme.action=#selector(readerSelectTheme(_:)); theme.selectItem(at:["light","paper","night"].firstIndex(of:UserDefaults.standard.string(forKey:"readerTheme") ?? "paper") ?? 1); theme.widthAnchor.constraint(equalToConstant:156).isActive=true; theme.controlSize = .small; readerThemeMenu=theme
+        let spacing=NSPopUpButton(frame:.zero,pullsDown:false); spacing.addItems(withTitles:["Compact","Normal","Relaxed"]); spacing.target=self; spacing.action=#selector(readerSelectSpacing(_:)); spacing.selectItem(at:["compact","normal","relaxed"].firstIndex(of:UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal") ?? 1); spacing.widthAnchor.constraint(equalToConstant:156).isActive=true; spacing.controlSize = .small; readerSpacingMenu=spacing
+        let size=NSTextField(labelWithString:"\(Int(readerFontSize)) pt"); size.alignment = .center; size.widthAnchor.constraint(equalToConstant:46).isActive=true; readerSizeLabel=size
+        let minus=NSButton(title:"−",target:self,action:#selector(readerDecreaseText)); minus.bezelStyle = .rounded; minus.controlSize = .small
+        let plus=NSButton(title:"+",target:self,action:#selector(readerIncreaseText)); plus.bezelStyle = .rounded; plus.controlSize = .small
+        let sizeControls=NSStackView(views:[minus,size,plus]); sizeControls.orientation = .horizontal; sizeControls.alignment = .centerY; sizeControls.spacing=6
+        func row(_ title:String,_ control:NSView)->NSStackView {
+            let label=NSTextField(labelWithString:title); label.font = .systemFont(ofSize:11); label.textColor = .secondaryLabelColor; label.widthAnchor.constraint(equalToConstant:86).isActive=true
+            let result=NSStackView(views:[label,control]); result.orientation = .horizontal; result.alignment = .centerY; result.spacing=8; return result
+        }
+        let heading=NSTextField(labelWithString:"Reading appearance"); heading.font = .systemFont(ofSize:13,weight:.semibold)
+        let stack=NSStackView(views:[heading,row("Typeface",font),row("Text size",sizeControls),row("Line spacing",spacing),row("Page color",theme)])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.distribution = .fill; stack.spacing=12; stack.translatesAutoresizingMaskIntoConstraints=false
+        let content=NSView(frame:NSRect(x:0,y:0,width:294,height:212)); content.addSubview(stack)
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:content.leadingAnchor,constant:18),stack.trailingAnchor.constraint(equalTo:content.trailingAnchor,constant:-18),stack.topAnchor.constraint(equalTo:content.topAnchor,constant:16),stack.bottomAnchor.constraint(equalTo:content.bottomAnchor,constant:-16)])
+        let controller=NSViewController(); controller.view=content
+        let popover=NSPopover(); popover.behavior = .transient; popover.contentViewController=controller; popover.contentSize=content.frame.size
+        readerSettingsPopover=popover; popover.show(relativeTo:sender.bounds,of:sender,preferredEdge:.minY)
     }
 
     private func readerPreferencePayload()->[String:Any] {
@@ -679,7 +709,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         readerProgressSlider?.doubleValue=percentage
         readerProgressLabel?.stringValue="\(Int((percentage*100).rounded()))%"
         let page=max(1,(info["page"] as? Int) ?? 1),pages=max(1,(info["pages"] as? Int) ?? 1)
-        readerPageLabel?.stringValue="Page \(page) of \(pages)"
+        readerPageLabel?.stringValue="\(page) / \(pages)"
         if let chapter=info["chapter"] as? Int,let menu=readerChapterMenu,chapter>=0,chapter<menu.numberOfItems { menu.selectItem(at:chapter) }
     }
 
@@ -707,6 +737,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let directory=readerTempDirectory
         readerWebView?.stopLoading()
         readerWebView?.configuration.userContentController.removeScriptMessageHandler(forName:"reader")
+        readerSettingsPopover?.performClose(nil); readerSettingsPopover=nil
         readerWebView=nil; readerContentView=nil; activeReader=nil; readerTempDirectory=nil
         readerChapterMenu=nil; readerFontMenu=nil; readerThemeMenu=nil; readerSpacingMenu=nil; readerSizeLabel=nil; readerProgressSlider=nil; readerProgressLabel=nil; readerPageLabel=nil; readerHighlightButton=nil; readerChapters=[]
         window.contentView=dashboardContentView
@@ -854,10 +885,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 self.setReaderStatus("Synced to both local servers · \(documents.count) file IDs · Hardcover forwards matched books")
                 self.send("readerProgressUpdated",["bookId":body["bookId"] ?? 0,"percentage":percent])
             } else if readerOK || crosspointOK {
+                self.readerWebView?.evaluateJavaScript("window.readerFailProgress && window.readerFailProgress()",completionHandler:nil)
                 let synced=([readerOK ? "KOReader Sync" : nil,crosspointOK ? "CrossPoint Sync" : nil].compactMap{$0}).joined(separator:" + ")
                 self.setReaderStatus("Synced to \(synced); retrying the other server…")
                 self.send("readerProgressUpdated",["bookId":body["bookId"] ?? 0,"percentage":percent])
             } else {
+                self.readerWebView?.evaluateJavaScript("window.readerFailProgress && window.readerFailProgress()",completionHandler:nil)
                 self.setReaderStatus("Both sync servers are unavailable · your book is still open locally.")
             }
         }
