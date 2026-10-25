@@ -24,6 +24,7 @@ targets:
       - path: Sources/ShelfCore/Tools/kosync_calibre_bridge.py
       - path: Sources/ShelfCore/Tools/shelf_config.py
       - path: Sources/ShelfCore/Tools/boox_settings.py
+      - path: Sources/ShelfCore/Tools/boox_rotation.py
       - path: Config/config.example.json
     dependencies:
       - package: ShelfCore
@@ -32,8 +33,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.3
-        CURRENT_PROJECT_VERSION: 4
+        MARKETING_VERSION: 0.1.4
+        CURRENT_PROJECT_VERSION: 5
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES

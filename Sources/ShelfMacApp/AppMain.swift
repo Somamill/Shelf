@@ -1346,7 +1346,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func confirmBooxTransfer(serial:String) {
         let alert=NSAlert()
         alert.messageText="Send Calibre settings to BOOX?"
-        alert.informativeText="This adds the Calibre OPDS catalog and configures KOReader Sync. Existing KOReader settings are backed up on the tablet first. KOReader must be closed; reading progress is not changed. The settings include your Calibre password."
+        alert.informativeText="This adds Calibre OPDS and KOReader Sync, enables Android auto-rotate, and turns on BOOX's per-app system-orientation setting for KOReader. Existing settings are backed up first. Close KOReader before continuing. The settings include your Calibre password."
         alert.addButton(withTitle:"Send settings")
         alert.addButton(withTitle:"Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -1387,7 +1387,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let fm=FileManager.default
         let root=fm.temporaryDirectory.appendingPathComponent("KOReaderCalibreSetup-\(UUID().uuidString)",isDirectory:true)
         let source=root.appendingPathComponent("existing",isDirectory:true)
-        let output=root.appendingPathComponent("settings",isDirectory:true)
+        let koreader=root.appendingPathComponent("koreader",isDirectory:true)
+        let output=koreader.appendingPathComponent("settings",isDirectory:true)
         try fm.createDirectory(at:source,withIntermediateDirectories:true)
         let values=try booxSettingsValues()
         let json=try JSONSerialization.data(withJSONObject:values)
@@ -1395,11 +1396,18 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
         let merged=Self.run("/usr/bin/python3",[helper,source.path,output.path],input:input)
         guard merged.code == 0 else { try? fm.removeItem(at:root); throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
+        // KOReader stores the active plugin files in settings/, but its older
+        // monolithic reader configuration lives beside that directory.
+        let legacyInSettings=output.appendingPathComponent("settings.reader.lua")
+        let legacyAtRoot=koreader.appendingPathComponent("settings.reader.lua")
+        try fm.moveItem(at:legacyInSettings,to:legacyAtRoot)
         let ip=values["lan_ip"] ?? ""
         let readme="""
         KOReader Calibre setup
 
-        Copy the included settings files into the tablet's koreader/settings folder while KOReader is closed. Keep a copy of the existing settings first. This package contains the Calibre server password. Delete it securely after setup.
+        Copy the included files to the matching locations under the tablet's koreader folder while KOReader is closed: settings/opds.lua and settings/kosync.lua go in koreader/settings; settings.reader.lua goes directly in koreader. Keep a copy of the existing settings first. This package contains the Calibre server password. Delete it securely after setup.
+
+        For automatic rotation, enable Android Auto-rotate and, while KOReader is active, open BOOX E-Ink Center > Optimize > Others > Force to follow system orientation.
 
         Calibre OPDS: http://\(ip):8080/opds
         KOReader Sync: http://\(ip):17200
@@ -1424,6 +1432,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let adb=adbPath
         let check=Self.run(adb,["-s",serial,"shell","test","-d","/sdcard/koreader/settings"])
         let settingsPath=check.code == 0 ? "/sdcard/koreader/settings" : "/storage/emulated/0/koreader/settings"
+        let koreaderRoot=String(settingsPath.dropLast("/settings".count))
+        let legacyReaderPath="\(koreaderRoot)/settings.reader.lua"
         let exists=Self.run(adb,["-s",serial,"shell","test","-d",settingsPath])
         guard exists.code == 0 else { throw NSError(domain:"BooxSettings",code:5,userInfo:[NSLocalizedDescriptionKey:"KOReader settings folder was not found. Open KOReader once on the tablet, close it, then retry."]) }
         let running=Self.run(adb,["-s",serial,"shell","pidof","org.koreader.launcher"])
@@ -1433,12 +1443,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let existing=root.appendingPathComponent("existing",isDirectory:true)
         let output=root.appendingPathComponent("merged",isDirectory:true)
         try FileManager.default.createDirectory(at:existing,withIntermediateDirectories:true)
-        for name in ["opds.lua","kosync.lua","settings.reader.lua"] {
+        for name in ["opds.lua","kosync.lua"] {
             let remote="\(settingsPath)/\(name)"
             if Self.run(adb,["-s",serial,"shell","test","-f",remote]).code == 0 {
                 let pulled=Self.run(adb,["-s",serial,"pull",remote,existing.appendingPathComponent(name).path])
                 guard pulled.code == 0 else { throw NSError(domain:"BooxSettings",code:7,userInfo:[NSLocalizedDescriptionKey:"Could not safely back up existing \(name): \(pulled.output)"]) }
             }
+        }
+        if Self.run(adb,["-s",serial,"shell","test","-f",legacyReaderPath]).code == 0 {
+            let pulled=Self.run(adb,["-s",serial,"pull",legacyReaderPath,existing.appendingPathComponent("settings.reader.lua").path])
+            guard pulled.code == 0 else { throw NSError(domain:"BooxSettings",code:7,userInfo:[NSLocalizedDescriptionKey:"Could not safely back up the legacy KOReader settings file: \(pulled.output)"]) }
         }
         let values=try booxSettingsValues()
         guard let json=String(data:try JSONSerialization.data(withJSONObject:values),encoding:.utf8) else { throw NSError(domain:"BooxSettings",code:8,userInfo:[NSLocalizedDescriptionKey:"Could not encode settings."]) }
@@ -1450,37 +1464,57 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let mkdir=Self.run(adb,["-s",serial,"shell","mkdir","-p",backup])
         guard mkdir.code == 0 else { throw NSError(domain:"BooxSettings",code:9,userInfo:[NSLocalizedDescriptionKey:"Could not create tablet backup folder."]) }
         var existed=Set<String>()
-        for name in ["opds.lua","kosync.lua","settings.reader.lua"] where FileManager.default.fileExists(atPath:existing.appendingPathComponent(name).path) {
+        for name in ["opds.lua","kosync.lua"] where FileManager.default.fileExists(atPath:existing.appendingPathComponent(name).path) {
             existed.insert(name)
             let cp=Self.run(adb,["-s",serial,"shell","cp","\(settingsPath)/\(name)","\(backup)/\(name)"])
             guard cp.code == 0 else { throw NSError(domain:"BooxSettings",code:10,userInfo:[NSLocalizedDescriptionKey:"Could not back up tablet file \(name). No settings were changed."]) }
         }
+        if existed.contains("settings.reader.lua") {
+            let cp=Self.run(adb,["-s",serial,"shell","cp",legacyReaderPath,"\(backup)/settings.reader.lua"])
+            guard cp.code == 0 else { throw NSError(domain:"BooxSettings",code:10,userInfo:[NSLocalizedDescriptionKey:"Could not back up the legacy KOReader settings file. No settings were changed."]) }
+        }
+        let oldRotation=Self.run(adb,["-s",serial,"shell","settings","get","system","accelerometer_rotation"]).output.trimmingCharacters(in:.whitespacesAndNewlines)
+        if ["0","1"].contains(oldRotation) {
+            let rotationBackup=root.appendingPathComponent("accelerometer_rotation.txt")
+            try (oldRotation+"\n").write(to:rotationBackup,atomically:true,encoding:.utf8)
+            let pushed=Self.run(adb,["-s",serial,"push",rotationBackup.path,"\(backup)/accelerometer_rotation.txt"])
+            guard pushed.code == 0 else { throw NSError(domain:"BooxSettings",code:13,userInfo:[NSLocalizedDescriptionKey:"Could not back up Android's auto-rotate setting."]) }
+        }
         for name in ["opds.lua","kosync.lua","settings.reader.lua"] {
-            let pushed=Self.run(adb,["-s",serial,"push",output.appendingPathComponent(name).path,"\(settingsPath)/\(name)"])
+            let destination=name == "settings.reader.lua" ? legacyReaderPath : "\(settingsPath)/\(name)"
+            let pushed=Self.run(adb,["-s",serial,"push",output.appendingPathComponent(name).path,destination])
             if pushed.code != 0 {
-                restoreBooxSettings(adb:adb,serial:serial,settingsPath:settingsPath,backup:backup,existed:existed)
+                restoreBooxSettings(adb:adb,serial:serial,settingsPath:settingsPath,legacyReaderPath:legacyReaderPath,backup:backup,existed:existed)
                 throw NSError(domain:"BooxSettings",code:11,userInfo:[NSLocalizedDescriptionKey:"Transfer failed while writing \(name); previous files were restored where possible."])
             }
         }
         let verify=root.appendingPathComponent("verify",isDirectory:true)
         try FileManager.default.createDirectory(at:verify,withIntermediateDirectories:true)
         for name in ["opds.lua","kosync.lua","settings.reader.lua"] {
-            let pulled=Self.run(adb,["-s",serial,"pull","\(settingsPath)/\(name)",verify.appendingPathComponent(name).path])
+            let source=name == "settings.reader.lua" ? legacyReaderPath : "\(settingsPath)/\(name)"
+            let pulled=Self.run(adb,["-s",serial,"pull",source,verify.appendingPathComponent(name).path])
             let original=try Data(contentsOf:output.appendingPathComponent(name))
             let received=try? Data(contentsOf:verify.appendingPathComponent(name))
             if pulled.code != 0 || received != original {
-                restoreBooxSettings(adb:adb,serial:serial,settingsPath:settingsPath,backup:backup,existed:existed)
+                restoreBooxSettings(adb:adb,serial:serial,settingsPath:settingsPath,legacyReaderPath:legacyReaderPath,backup:backup,existed:existed)
                 throw NSError(domain:"BooxSettings",code:12,userInfo:[NSLocalizedDescriptionKey:"The tablet did not verify \(name) after transfer; previous settings were restored where possible."])
             }
         }
-        return "BOOX settings sent. Existing files are backed up in \(backup). Reopen KOReader and check Calibre OPDS and Sync settings."
+        let rotationHelper=Bundle.main.resourceURL?.appendingPathComponent("boox_rotation.py").path ?? "\(home)/Shelf/boox_rotation.py"
+        let rotation=Self.run("/usr/bin/python3",[rotationHelper,adb,serial])
+        guard rotation.code == 0 else {
+            throw NSError(domain:"BooxSettings",code:14,userInfo:[NSLocalizedDescriptionKey:"Calibre OPDS and KOReader Sync were transferred successfully, but automatic rotation could not be enabled: \(rotation.output.trimmingCharacters(in:.whitespacesAndNewlines).suffix(220))"])
+        }
+        return "BOOX setup complete: Calibre OPDS, KOReader Sync, and automatic rotation are enabled. Backups are in \(backup). KOReader is open; verify rotation by turning the tablet."
     }
 
-    private func restoreBooxSettings(adb:String,serial:String,settingsPath:String,backup:String,existed:Set<String>) {
-        for file in ["opds.lua","kosync.lua","settings.reader.lua"] {
+    private func restoreBooxSettings(adb:String,serial:String,settingsPath:String,legacyReaderPath:String,backup:String,existed:Set<String>) {
+        for file in ["opds.lua","kosync.lua"] {
             if existed.contains(file) { _=Self.run(adb,["-s",serial,"shell","cp","\(backup)/\(file)","\(settingsPath)/\(file)"]) }
             else { _=Self.run(adb,["-s",serial,"shell","rm","-f","\(settingsPath)/\(file)"]) }
         }
+        if existed.contains("settings.reader.lua") { _=Self.run(adb,["-s",serial,"shell","cp","\(backup)/settings.reader.lua",legacyReaderPath]) }
+        else { _=Self.run(adb,["-s",serial,"shell","rm","-f",legacyReaderPath]) }
     }
 
     private func adbDevices() -> [String] {

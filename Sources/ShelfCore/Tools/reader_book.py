@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Prepare one local Calibre book for the dashboard's built-in reader."""
 
+from __future__ import annotations
+
 import hashlib
 import fcntl
 import json
