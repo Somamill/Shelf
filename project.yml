@@ -43,6 +43,7 @@ targets:
         INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
         CODE_SIGN_IDENTITY: "-"
         ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
 schemes:
   Shelf:
     build:
