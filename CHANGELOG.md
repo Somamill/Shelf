@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.9
+
+- Recognizes chapter links emitted by Calibre HTMLZ conversion, including EPUBs whose chapter markers are flattened into titled `div.main` elements rather than semantic headings.
+- Extends Liquid Glass-inspired surfaces and controls consistently across dashboard pages, library, setup, service cards, overlays, and reader toolbar while keeping book text legible.
+- Adds dark-mode, reduced-transparency, reduced-motion, and narrow-window treatments to the shared UI finish.
+
+
 ## 0.1.8
 
 - Adds persistent cover-grid and compact-list library layouts, natural title/author sorting, progress sorting, and search across title, author, series, and tags.
