@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Adds automatic BOOX rotation setup to the Android settings transfer, including a backup of the previous system auto-rotate value.
+- Corrects the legacy KOReader settings-file location so existing endpoint values are updated in the file KOReader actually reads.
+- Keeps the reader preparation helper compatible with the bundled macOS Python 3.9 runtime.
+
 ## 0.1.3
 
 - Adds horizontal swipes between dashboard sections while preserving navigation controls and vertical scrolling.

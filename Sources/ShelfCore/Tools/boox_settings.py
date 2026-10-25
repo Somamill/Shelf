@@ -235,6 +235,30 @@ def main() -> int:
         raise ValueError("legacy KOReader Sync settings have an unsupported shape")
     legacy.update({"custom_server": sync_url, "username": username, "userkey": userkey})
     reader["kosync"] = legacy
+    # Older KOReader builds kept these values at the top level. Update the
+    # server identity there too so a downgrade or migration cannot revive an
+    # obsolete port from the old settings.reader.lua file.
+    reader["kosync_server"] = sync_url
+    reader["kosync_user"] = username
+
+    legacy_servers = reader.get("opds_servers", {})
+    if isinstance(legacy_servers, list):
+        legacy_servers = {index + 1: item for index, item in enumerate(legacy_servers)}
+    if not isinstance(legacy_servers, dict):
+        raise ValueError("legacy KOReader OPDS server list has an unsupported shape")
+    legacy_server = next(
+        (
+            item for item in legacy_servers.values()
+            if isinstance(item, dict) and (item.get("url") == opds_url or item.get("title") == "Calibre Library")
+        ),
+        None,
+    )
+    if legacy_server is None:
+        numeric = [key for key in legacy_servers if isinstance(key, int)]
+        legacy_server = {}
+        legacy_servers[max(numeric, default=0) + 1] = legacy_server
+    legacy_server.update({"title": "Calibre Library", "url": opds_url, "username": username, "password": password})
+    reader["opds_servers"] = legacy_servers
     write_settings(output / "settings.reader.lua", reader)
     return 0
 
