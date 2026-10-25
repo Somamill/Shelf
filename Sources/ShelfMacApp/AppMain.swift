@@ -308,7 +308,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "updateDashboard": confirmUpdateDashboard()
         case "sendBooxSettings": sendBooxSettings()
         case "openCrossPointSettings": openCrossPointSettings()
-        case "connectReadwiseReader": connectReadwiseReader()
+        case "saveReadwiseReaderToken": saveReadwiseReaderToken(body["token"] as? String ?? "")
         case "disconnectReadwiseReader": disconnectReadwiseReader()
         case "syncReadwiseReader": syncReadwiseReader()
         case "openBookPlayer": if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") { NSWorkspace.shared.open(url) }
@@ -864,22 +864,31 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
-    private func connectReadwiseReader() {
-        let alert=NSAlert()
-        alert.messageText="Connect Readwise Reader"
-        alert.informativeText="Paste your Readwise access token. Shelf stores it in macOS Keychain and uses it only for Reader sync and highlights."
-        let field=NSSecureTextField(frame:NSRect(x:0,y:0,width:310,height:24))
-        field.placeholderString="Readwise access token"
-        alert.accessoryView=field
-        alert.addButton(withTitle:"Save connection")
-        alert.addButton(withTitle:"Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let token=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard !token.isEmpty,saveKeychainCredential("readwise-reader-token",value:token) else {
-            notify("Could not save the Readwise token to macOS Keychain."); return
+    private func saveReadwiseReaderToken(_ token:String) {
+        let token=token.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !token.isEmpty else { notify("Paste your Readwise access token first."); return }
+        let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
+        let input:[String:Any]=["action":"validateToken","readwiseToken":token]
+        guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else {
+            notify("Could not prepare Readwise token validation."); return
         }
-        notify("Readwise Reader connected. Choose Sync now to import progress and highlights.")
-        refresh()
+        notify("Checking the Readwise access token…")
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            let result=Self.run("/usr/bin/python3",[helper],input:json)
+            let response=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8))) as? [String:Any] ?? [:]
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard result.code == 0, response["ok"] as? Bool == true else {
+                    self.notify(response["error"] as? String ?? "Readwise could not validate this token."); return
+                }
+                guard self.saveKeychainCredential("readwise-reader-token",value:token) else {
+                    self.notify("Could not save the validated token to macOS Keychain."); return
+                }
+                self.send("readwiseTokenSaved",["connected":true])
+                self.notify("Readwise access token verified and saved to macOS Keychain.")
+                self.refresh()
+            }
+        }
     }
 
     private func disconnectReadwiseReader() {

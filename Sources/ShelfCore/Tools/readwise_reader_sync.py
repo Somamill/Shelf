@@ -26,6 +26,22 @@ LIBRARY = configured_path("library", str(BOOKS / "Calibre Library"))
 API = "https://readwise.io/api/v3/list/"
 
 
+def validate_token(token: str) -> bool:
+    request = urllib.request.Request(
+        "https://readwise.io/api/v2/auth/",
+        headers={"Authorization": f"Token {token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status == 204
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403):
+            raise RuntimeError("Readwise rejected this access token.") from None
+        raise RuntimeError(f"Readwise returned HTTP {error.code} while validating the token.") from None
+    except OSError as error:
+        raise RuntimeError(f"Could not reach Readwise: {type(error).__name__}.") from None
+
+
 def api_get(url: str, token: str) -> dict:
     request = urllib.request.Request(url, headers={"Authorization": f"Token {token}"})
     try:
@@ -58,6 +74,11 @@ def documents(token: str, category: str) -> list[dict]:
 def normalize(value: str) -> str:
     value = unicodedata.normalize("NFKC", str(value or "")).casefold()
     return "".join(char for char in value if char.isalnum())
+
+
+def normalize_author(value: str) -> str:
+    value = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return "".join(sorted(re.findall(r"[^\W_]+", value, re.UNICODE)))
 
 
 def book_rows() -> list[dict]:
@@ -103,7 +124,7 @@ def partial_md5(path: str) -> str:
 
 def match_book(document: dict, books: list[dict]) -> dict | None:
     title = normalize(document.get("title", ""))
-    author = normalize(document.get("author", ""))
+    author = normalize_author(document.get("author", ""))
     if len(title) < 4:
         return None
     ranked = []
@@ -112,7 +133,7 @@ def match_book(document: dict, books: list[dict]) -> dict | None:
         score = difflib.SequenceMatcher(None, title, book_title).ratio()
         if title == book_title:
             score = 1.0
-        book_author = normalize(book["author"])
+        book_author = normalize_author(book["author"])
         author_score = difflib.SequenceMatcher(None, author, book_author).ratio() if author and book_author else 0.0
         ranked.append((score, author_score, book))
     ranked.sort(key=lambda row: (row[0], row[1]), reverse=True)
@@ -199,6 +220,12 @@ def main() -> int:
     try:
         payload = json.load(sys.stdin)
         token = str(payload.get("readwiseToken", "")).strip()
+        if payload.get("action") == "validateToken":
+            if not token:
+                raise RuntimeError("Paste a Readwise access token first.")
+            validate_token(token)
+            print(json.dumps({"ok": True}))
+            return 0
         if payload.get("action") == "createHighlight":
             if not token:
                 raise RuntimeError("Connect Readwise in Shelf to sync highlights.")
