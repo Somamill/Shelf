@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.11
+
+- Fixes diagnostics export by creating its temporary report folder before writing files, then building the ZIP.
+- Logs successful and failed export attempts locally and reports the count of included log and pasted-output issues accurately.
+
+
 ## 0.1.10
 
 - Replaces the book mark with a larger, simpler open-book silhouette whose outer page wings lift upward from the spine.

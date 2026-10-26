@@ -1719,8 +1719,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let self else { return }
             do {
                 let result=try self.createDiagnosticBundle(at:destination,additionalText:additionalText)
+                NSLog("Shelf diagnostics export completed (%ld distinct issues)",result)
                 DispatchQueue.main.async { self.notify("Compact report ready · \(result) distinct issues") }
             } catch {
+                NSLog("Shelf diagnostics export failed: %@",error.localizedDescription)
                 DispatchQueue.main.async { self.notify("Export failed: \(error.localizedDescription)") }
             }
         }
@@ -1730,6 +1732,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let fm=FileManager.default
         let root=fm.temporaryDirectory.appendingPathComponent("CalibreStackDiagnostics-\(UUID().uuidString)",isDirectory:true)
         defer { try? fm.removeItem(at:root) }
+        // Create the parent before writing the first report file. Without this,
+        // every export fails with ENOENT before the ZIP command is reached.
+        try fm.createDirectory(at:root,withIntermediateDirectories:true)
         let state=readDashboard()
         let stateData=try JSONSerialization.data(withJSONObject:state,options:[.prettyPrinted,.sortedKeys])
         try stateData.write(to:root.appendingPathComponent("dashboard-state.json"),options:.atomic)
@@ -1768,6 +1773,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             issue.count > 1 ? "Repeated \(issue.count) times: \(issue.message)" : issue.message
         }
         let report=issueLines.isEmpty ? "No recent errors found in the collected log tails." : issueLines.joined(separator:"\n")
+        var exportedIssueCount=issueLines.isEmpty ? 0 : 1
         try report.write(to:root.appendingPathComponent("ERRORS.txt"),atomically:true,encoding:.utf8)
         if !additionalText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
             let summaries=additionalText.components(separatedBy:.newlines).filter { line in
@@ -1777,12 +1783,13 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let distinct=summaries.filter { seen.insert(diagnosticFingerprint($0)).inserted }.prefix(1)
             if !distinct.isEmpty {
                 try distinct.joined(separator:"\n").write(to:root.appendingPathComponent("USER-REPORTED-OUTPUT.txt"),atomically:true,encoding:.utf8)
+                exportedIssueCount += distinct.count
             }
         }
 
         let zip=Self.run("/usr/bin/ditto",["-c","-k","--sequesterRsrc","--keepParent",root.path,destination.path])
         guard zip.code==0 else { throw NSError(domain:"CalibreStackDiagnostics",code:Int(zip.code),userInfo:[NSLocalizedDescriptionKey:zip.output]) }
-        return min(uniqueIssues.count,1)
+        return exportedIssueCount
     }
 
     private func notify(_ text:String) { send("dashboardNotice",["message":text]) }
