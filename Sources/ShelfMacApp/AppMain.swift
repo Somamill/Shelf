@@ -4,6 +4,7 @@ import ImageIO
 import Foundation
 import UniformTypeIdentifiers
 import Security
+import LocalAuthentication
 import WebKit
 import ShelfCore
 
@@ -129,6 +130,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerFontSize:Double=19
     private var readerFontChoice="sans"
     private var readerIsJapanese=false
+    private let keychainCacheLock=NSLock()
+    private var keychainCredentialCache=[String:String]()
+    private var keychainCredentialLookups=Set<String>()
     private var loadingLabel: NSTextField!
     private var updates: [String: Any] = ["calibreInstalled":"9.16", "calibreLatest":"Not checked", "crossPointInstalled":"1.6.0", "crossPointLatest":"Not checked", "checkedAt":NSNull()]
     private let uid = String(getuid())
@@ -161,39 +165,68 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return found.isEmpty ? fallback : found
     }
 
-    private func keychainCredential(_ key: String) -> String? {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+    private func keychainCredential(_ key: String,allowInteraction:Bool=false) -> String? {
+        keychainCacheLock.lock()
+        defer { keychainCacheLock.unlock() }
+        if keychainCredentialLookups.contains(key) { return keychainCredentialCache[key] }
+        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: "app.shelf.dashboard",
                                     kSecAttrAccount as String: key,
                                     kSecReturnData as String: true,
                                     kSecMatchLimit as String: kSecMatchLimitOne]
+        let authenticationContext=LAContext()
+        authenticationContext.interactionNotAllowed = !allowInteraction
+        query[kSecUseAuthenticationContext as String]=authenticationContext
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let status=SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,let data=result as? Data,let value=String(data:data,encoding:.utf8) else {
+            if status == errSecItemNotFound { keychainCredentialLookups.insert(key) }
+            return nil
+        }
+        keychainCredentialLookups.insert(key)
+        keychainCredentialCache[key]=value
+        return value
     }
 
     @discardableResult
     private func saveKeychainCredential(_ key: String, value: String) -> Bool {
+        keychainCacheLock.lock()
+        defer { keychainCacheLock.unlock() }
         let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: "app.shelf.dashboard",
                                        kSecAttrAccount as String: key]
         let data = Data(value.utf8)
         let update = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if update == errSecSuccess { return true }
+        if update == errSecSuccess {
+            keychainCredentialCache[key]=value
+            keychainCredentialLookups.insert(key)
+            return true
+        }
         var add = identity
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        let saved=SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        if saved {
+            keychainCredentialCache[key]=value
+            keychainCredentialLookups.insert(key)
+        }
+        return saved
     }
 
     @discardableResult
     private func deleteKeychainCredential(_ key: String) -> Bool {
+        keychainCacheLock.lock()
+        defer { keychainCacheLock.unlock() }
         let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: "app.shelf.dashboard",
                                        kSecAttrAccount as String: key]
         let status = SecItemDelete(identity as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        let deleted=status == errSecSuccess || status == errSecItemNotFound
+        if deleted {
+            keychainCredentialCache.removeValue(forKey:key)
+            keychainCredentialLookups.insert(key)
+        }
+        return deleted
     }
 
     static func main() {
@@ -528,7 +561,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func syncAuthKey() -> String {
-        if let saved=keychainCredential("sync-api-key"),!saved.isEmpty { return saved }
+        if let saved=keychainCredential("sync-api-key",allowInteraction:true),!saved.isEmpty { return saved }
         return Self.run(dockerPath,["exec","kosync","redis-cli","--raw","-n","1","GET","user:\(username):key"]).output.trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
@@ -859,7 +892,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func publishReadwiseHighlight(title:String,author:String,text:String,completion:@escaping(Bool)->Void) {
-        guard let token=keychainCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
+        guard let token=keychainCredential("readwise-reader-token",allowInteraction:true),!token.isEmpty else { completion(false); return }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
         let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
@@ -907,7 +940,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func syncReadwiseReader() {
         let token:String
-        if let saved=keychainCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
+        if let saved=keychainCredential("readwise-reader-token",allowInteraction:true),!saved.isEmpty { token=saved }
         else {
             let alert=NSAlert()
             alert.messageText="Connect Readwise Reader"

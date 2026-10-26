@@ -9,6 +9,20 @@ DERIVED_DATA="$BUILD_ROOT/DerivedData"
 APPLICATIONS_DIR="${SHELF_APPLICATIONS_DIR:-/Applications}"
 APP="$APPLICATIONS_DIR/Shelf.app"
 
+# A stable signing identity keeps macOS Keychain's app access decision valid
+# across rebuilds. Ad-hoc signatures are tied to each exact binary and can
+# trigger fresh Keychain confirmations after every build.
+SIGNING_IDENTITY="${SHELF_SIGNING_IDENTITY:-}"
+if [[ -z "$SIGNING_IDENTITY" ]] && command -v security >/dev/null 2>&1; then
+  SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -nE 's/.*"(Developer ID Application:.*|Apple Development:.*)"/\1/p' \
+    | head -n 1 || true)"
+fi
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="-"
+  echo "Warning: no stable Apple signing identity is installed; macOS may ask again for Keychain access after a future app update." >&2
+fi
+
 mkdir -p "$CONFIG_DIR" "$BUILD_ROOT"
 if [[ ! -e "$CONFIG_FILE" ]]; then
   cp "$PROJECT_ROOT/Config/config.example.json" "$CONFIG_FILE"
@@ -47,7 +61,7 @@ fi
 osascript -e 'tell application "Shelf" to quit' >/dev/null 2>&1 || true
 if xcodebuild -version >/dev/null 2>&1; then
   xcodebuild -project "$PROJECT_ROOT/Shelf.xcodeproj" -scheme Shelf -configuration Release \
-    -derivedDataPath "$DERIVED_DATA" CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES build
+    -derivedDataPath "$DERIVED_DATA" CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" CODE_SIGNING_ALLOWED=YES build
   BUILT_APP="$DERIVED_DATA/Build/Products/Release/Shelf.app"
 else
   BUILT_APP="$BUILD_ROOT/Manual/Shelf.app"
@@ -77,14 +91,14 @@ else
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.1.11</string>
-<key>CFBundleVersion</key><string>12</string>
+<key>CFBundleShortVersionString</key><string>0.1.12</string>
+<key>CFBundleVersion</key><string>13</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
 PLIST
   xattr -cr "$BUILT_APP" 2>/dev/null || true
-  codesign --force --deep --sign - "$BUILT_APP"
+  codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILT_APP"
 fi
 if [[ ! -d "$BUILT_APP" ]]; then
   echo "Xcode completed without creating Shelf.app." >&2

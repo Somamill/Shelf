@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Make background Keychain reads non-interactive with `LAContext` and cache successful lookups so periodic dashboard refreshes do not open repeated access dialogs. User-started sync actions can still request access when needed.
+- Prefer a stable Apple signing identity during local installs, avoiding ad-hoc signatures when one is available.
+- Warn when this Mac falls back to an ad-hoc signature, which can cause Keychain to ask again after app updates.
+
 ## 0.1.11
 
 - Fixes diagnostics export by creating its temporary report folder before writing files, then building the ZIP.
