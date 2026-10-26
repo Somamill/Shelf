@@ -165,45 +165,53 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return found.isEmpty ? fallback : found
     }
 
-    private func keychainCredential(_ key: String,allowInteraction:Bool=false) -> String? {
+    private func keychainCredential(_ key: String) -> String? {
         keychainCacheLock.lock()
         defer { keychainCacheLock.unlock() }
         if keychainCredentialLookups.contains(key) { return keychainCredentialCache[key] }
-        let accessIdentity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                             kSecAttrService as String: "app.shelf.dashboard",
-                                             kSecAttrAccount as String: key]
-        var query=accessIdentity
+        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                       kSecAttrService as String: "app.shelf.dashboard",
+                                       kSecAttrAccount as String: key,
+                                       kSecAttrSynchronizable as String: false]
+        var query=identity
+        query[kSecUseDataProtectionKeychain as String]=true
         query[kSecReturnData as String]=true
         query[kSecMatchLimit as String]=kSecMatchLimitOne
+        // Never let background refreshes surface repeated Keychain or iCloud
+        // Keychain dialogs. New Shelf credentials are stored locally in the
+        // Data Protection Keychain; legacy entries are read without UI.
         let authenticationContext=LAContext()
-        authenticationContext.interactionNotAllowed = !allowInteraction
+        authenticationContext.interactionNotAllowed = true
         query[kSecUseAuthenticationContext as String]=authenticationContext
         var result: CFTypeRef?
-        let status=SecItemCopyMatching(query as CFDictionary, &result)
+        var status=SecItemCopyMatching(query as CFDictionary,&result)
+        var legacy=false
+        if status == errSecItemNotFound {
+            // Migrate only non-synchronizable legacy items. This excludes
+            // iCloud Keychain records, which caused a prompt per credential.
+            var oldQuery=identity
+            oldQuery[kSecUseDataProtectionKeychain as String]=false
+            oldQuery[kSecReturnData as String]=true
+            oldQuery[kSecMatchLimit as String]=kSecMatchLimitOne
+            oldQuery[kSecUseAuthenticationContext as String]=authenticationContext
+            result=nil
+            status=SecItemCopyMatching(oldQuery as CFDictionary,&result)
+            legacy=status == errSecSuccess
+        }
         guard status == errSecSuccess,let data=result as? Data,let value=String(data:data,encoding:.utf8) else {
             if status == errSecItemNotFound { keychainCredentialLookups.insert(key) }
             return nil
         }
         keychainCredentialLookups.insert(key)
         keychainCredentialCache[key]=value
-        setShelfKeychainAccess(accessIdentity,key:key)
+        if legacy {
+            var add=identity
+            add[kSecUseDataProtectionKeychain as String]=true
+            add[kSecValueData as String]=data
+            add[kSecAttrAccessible as String]=kSecAttrAccessibleAfterFirstUnlock
+            _=SecItemAdd(add as CFDictionary,nil)
+        }
         return value
-    }
-
-    // Keep the access list tied to Shelf's stable signing identity. Ad-hoc
-    // rebuilds change identity and are a common cause of recurring prompts.
-    private func shelfKeychainAccess(_ key:String)->SecAccess? {
-        var app:SecTrustedApplication?
-        let trustedStatus=Bundle.main.bundleURL.path.withCString { SecTrustedApplicationCreateFromPath($0,&app) }
-        guard trustedStatus == errSecSuccess,let app else { return nil }
-        var access:SecAccess?
-        let accessStatus=SecAccessCreate("Shelf · \(key)" as CFString,[app] as CFArray,&access)
-        return accessStatus == errSecSuccess ? access : nil
-    }
-
-    private func setShelfKeychainAccess(_ identity:[String:Any],key:String) {
-        guard let access=shelfKeychainAccess(key) else { return }
-        SecItemUpdate(identity as CFDictionary,[kSecAttrAccess as String:access] as CFDictionary)
     }
 
     @discardableResult
@@ -212,11 +220,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         defer { keychainCacheLock.unlock() }
         let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key]
+                                       kSecAttrAccount as String: key,
+                                       kSecUseDataProtectionKeychain as String: true,
+                                       kSecAttrSynchronizable as String: false]
         let data = Data(value.utf8)
         let update = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if update == errSecSuccess {
-            setShelfKeychainAccess(identity,key:key)
             keychainCredentialCache[key]=value
             keychainCredentialLookups.insert(key)
             return true
@@ -224,9 +233,6 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         var add = identity
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        if let access=shelfKeychainAccess(key) {
-            add[kSecAttrAccess as String]=access
-        }
         let saved=SecItemAdd(add as CFDictionary, nil) == errSecSuccess
         if saved {
             keychainCredentialCache[key]=value
@@ -241,9 +247,15 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         defer { keychainCacheLock.unlock() }
         let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key]
-        let status = SecItemDelete(identity as CFDictionary)
-        let deleted=status == errSecSuccess || status == errSecItemNotFound
+                                       kSecAttrAccount as String: key,
+                                       kSecAttrSynchronizable as String: false]
+        var protected=identity
+        protected[kSecUseDataProtectionKeychain as String]=true
+        var legacy=identity
+        legacy[kSecUseDataProtectionKeychain as String]=false
+        let status = SecItemDelete(protected as CFDictionary)
+        let legacyStatus=SecItemDelete(legacy as CFDictionary)
+        let deleted=(status == errSecSuccess || status == errSecItemNotFound) && (legacyStatus == errSecSuccess || legacyStatus == errSecItemNotFound)
         if deleted {
             keychainCredentialCache.removeValue(forKey:key)
             keychainCredentialLookups.insert(key)
@@ -277,7 +289,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         webView.navigationDelegate=self
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1240,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title = "Shelf"
-        window.appearance = NSAppearance(named:.aqua)
+        // A nil appearance follows the user's macOS light/dark setting.
         // Allow practical Split View sizing so native edge snapping works on
         // MacBook screens without forcing the dashboard above half-screen width.
         window.minSize = NSSize(width:720,height:520)
@@ -477,12 +489,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         appMenu.addItem(withTitle:"Quit Dashboard",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let view=NSMenuItem(); view.title="Dashboard"; menu.addItem(view)
         let viewMenu=NSMenu(); view.submenu=viewMenu
-        let refreshItem=NSMenuItem(title:"Refresh status",action:#selector(menuRefresh),keyEquivalent:"r"); refreshItem.target=self; viewMenu.addItem(refreshItem)
         let updateItem=NSMenuItem(title:"Check for updates",action:#selector(menuUpdate),keyEquivalent:"u"); updateItem.target=self; updateItem.keyEquivalentModifierMask=[.command,.shift]; viewMenu.addItem(updateItem)
         NSApp.mainMenu=menu
     }
 
-    @objc private func menuRefresh() { refresh() }
     @objc private func menuUpdate() { checkUpdates() }
 
     private func refresh() {
@@ -589,7 +599,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func syncAuthKey() -> String {
-        if let saved=keychainCredential("sync-api-key",allowInteraction:true),!saved.isEmpty { return saved }
+        if let saved=keychainCredential("sync-api-key"),!saved.isEmpty { return saved }
         return Self.run(dockerPath,["exec","kosync","redis-cli","--raw","-n","1","GET","user:\(username):key"]).output.trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
@@ -920,7 +930,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func publishReadwiseHighlight(title:String,author:String,text:String,completion:@escaping(Bool)->Void) {
-        guard let token=keychainCredential("readwise-reader-token",allowInteraction:true),!token.isEmpty else { completion(false); return }
+        guard let token=keychainCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
         let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
@@ -968,7 +978,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func syncReadwiseReader() {
         let token:String
-        if let saved=keychainCredential("readwise-reader-token",allowInteraction:true),!saved.isEmpty { token=saved }
+        if let saved=keychainCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
         else {
             let alert=NSAlert()
             alert.messageText="Connect Readwise Reader"
@@ -1315,7 +1325,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 else if mod == nil { state="warning" }
                 else { state="stale" }
                 if !(state == "healthy" && (age == nil || (age ?? 0) >= maxAge)) {
-                    summary=lastLine.isEmpty ? "No log activity recorded" : redact(lastLine)
+                    summary=lastLine.isEmpty ? "No log activity recorded" : humanLogSummary(lastLine)
                 }
                 if id == "bridge", lastLine.contains("BRIDGE END") {
                     let documents=Int(Self.capture(#"documents=(\d+)"#,lastLine) ?? "0") ?? 0
@@ -1344,6 +1354,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             ("Malware guard","\(logDir)/calibre-malware-guard.log"),("Xteink","\(logDir)/xteink-sync-configurator.log")
         ]
         var events=[[String:Any]]()
+        let installedAt=fileModified(Bundle.main.bundleURL.path) ?? .distantPast
         for (source,path) in sources {
             let modified=fileModified(path)
             for line in tail(path,lines:120) {
@@ -1352,7 +1363,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 let stamped=eventDate(line)
                 let eventTime=stamped ?? modified
                 guard let eventTime, Date().timeIntervalSince(eventTime) < (stamped == nil ? 86400 : 172800) else { continue }
-                events.append(["source":source,"level":level!,"message":redact(line),"date":iso(eventTime)])
+                if isResolvedBeforeThisBuild(line,eventTime,installedAt:installedAt) { continue }
+                events.append(["source":source,"level":level!,"message":humanLogSummary(line),"date":iso(eventTime)])
             }
         }
         var compacted=[String:[String:Any]]()
@@ -1379,7 +1391,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let shared=(md5(pass) == (plugin["progress_sync_password"] as? String ?? "") && md5(pass) == redis)
         let readerOPDS=service("readerOpds",fallback:"http://\(ip):8080/opds")
         let readerSync=service("readerSync",fallback:"http://\(ip):17200")
-        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(keychainCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
+        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"syncActivity":readSyncActivity(),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(keychainCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
     }
 
     private func confirmAndRun(_ id:String) {
@@ -1806,7 +1818,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         try stateData.write(to:root.appendingPathComponent("dashboard-state.json"),options:.atomic)
         let environment="""
         Shelf diagnostic export
-        Created: \(ISO8601DateFormatter().string(from:Date()))
+        Created: \(DateFormatter.localizedString(from:Date(),dateStyle:.medium,timeStyle:.medium)) (\(TimeZone.current.identifier))
         macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Architecture: \(Self.run("/usr/bin/uname",["-m"]).output.trimmingCharacters(in:.whitespacesAndNewlines))
         Hostname: \(Host.current().localizedName ?? "unknown")
@@ -1824,7 +1836,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let logFiles=(try? fm.contentsOfDirectory(at:logDirectory,includingPropertiesForKeys:nil))?.filter { $0.pathExtension.caseInsensitiveCompare("log") == .orderedSame }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending } ?? []
         let matcher=try NSRegularExpression(pattern:#"(?i)\b(error|failed|failure|fatal|exception|traceback|interruptederror|permission denied|operation not permitted)\b|already running"#)
         var uniqueIssues=[String:(message:String,count:Int,latest:Date)]()
-        let now=Date(),cutoff=now.addingTimeInterval(-7*86400)
+        let now=Date(),cutoff=now.addingTimeInterval(-7*86400),installedAt=fileModified(Bundle.main.bundleURL.path) ?? .distantPast
         for file in logFiles {
             let fileDate=fileModified(file.path)
             let lines=tail(file.path,lines:240)
@@ -1832,8 +1844,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 guard !reportsNoIssues(line) else { continue }
                 if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
                     guard let issueDate=eventDate(line) ?? fileDate,
-                          issueDate >= cutoff,issueDate <= now.addingTimeInterval(300) else { continue }
-                    let summary=compactDiagnosticLine("\(file.lastPathComponent): \(line)")
+                          issueDate >= cutoff,issueDate <= now.addingTimeInterval(300),
+                          !isResolvedBeforeThisBuild(line,issueDate,installedAt:installedAt) else { continue }
+                    let summary=humanLogSummary("\(file.lastPathComponent): \(line)")
                     let key=diagnosticFingerprint(summary)
                     if var issue=uniqueIssues[key] {
                         issue.count += 1
@@ -1947,6 +1960,37 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         if line.range(of:#"\b(error|failed|failure|fatal|exception|denied)\b"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Error" }
         if line.range(of:#"\b(warning|warn|unmatched|skipped)\b"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Warning" }
         return nil
+    }
+
+    private func readSyncActivity()->[[String:Any]] {
+        let path="\(logsPath)/kosync-calibre-bridge.log",modified=fileModified(path)
+        return tail(path,lines:600).reversed().compactMap { line in
+            guard let match=try? NSRegularExpression(pattern:#"\bSYNCED\s+book=(\d+).*?percentage=([0-9]*\.?[0-9]+).*?device=([^\r\n]+)"#),
+                  let found=match.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)),
+                  let idRange=Range(found.range(at:1),in:line),let progressRange=Range(found.range(at:2),in:line),
+                  let deviceRange=Range(found.range(at:3),in:line),let progress=Double(line[progressRange]) else { return nil }
+            let timestamp=eventDate(line) ?? modified
+            return ["bookId":Int(line[idRange]) ?? 0,"progress":min(1,max(0,progress)),"device":String(line[deviceRange]).trimmingCharacters(in:.whitespacesAndNewlines),"date":timestamp.map(iso) ?? ""]
+        }.prefix(120).map{$0}
+    }
+
+    private func humanLogSummary(_ source:String)->String {
+        let line=compactDiagnosticLine(source)
+        if let match=try? NSRegularExpression(pattern:#"\bSYNCED\s+book=\d+.*?percentage=([0-9]*\.?[0-9]+).*?device=([^\r\n]+)"#),
+           let found=match.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)),
+           let pRange=Range(found.range(at:1),in:line),let dRange=Range(found.range(at:2),in:line),let p=Double(line[pRange]) {
+            return "\(line[dRange].trimmingCharacters(in:.whitespacesAndNewlines)) saved reading progress · \(Int((min(1,max(0,p))*100).rounded()))% complete"
+        }
+        if line.localizedCaseInsensitiveContains("BACKUP END") { return "Library backup finished successfully." }
+        if line.localizedCaseInsensitiveContains("ambiguous column name: book") { return "Shelf could not read Calibre metadata. A database-query error occurred; check that Shelf has the latest update." }
+        if let docs=Self.capture(#"\bdocuments=(\d+)"#,line),let matched=Self.capture(#"\bmatched=(\d+)"#,line),line.localizedCaseInsensitiveContains("BRIDGE END") {
+            return "Reader sync finished · matched \(matched) of \(docs) progress records to Calibre."
+        }
+        return line
+    }
+
+    private func isResolvedBeforeThisBuild(_ line:String,_ date:Date,installedAt:Date)->Bool {
+        line.localizedCaseInsensitiveContains("ambiguous column name: book") && date < installedAt
     }
 
     private func compactDiagnosticLine(_ source:String)->String {

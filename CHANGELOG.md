@@ -1,3 +1,13 @@
+## 0.1.16
+
+- Combine reader setup with Setup and scheduled jobs with service operations.
+- Add reading statistics for saved progress, reader sync activity and connected tracking APIs.
+- Follow macOS appearance with an OLED-black Dark Mode and Liquid Glass controls.
+- Keep service, book and provider data on automatic refresh; present sync and backup log entries in plain language.
+- Hide old resolved issues from current diagnostics and keep each exported report based on fresh status and recent log tails.
+- Restrict Shelf credential reads to non-interactive, non-synchronizable local Keychain items to stop repeated iCloud Keychain prompts.
+- Keep book labels focused on title and author rather than internal file IDs or extensions.
+
 ## 0.1.15
 
 - Keep Calibre covers visible in Finished and add a Recently added shelf.

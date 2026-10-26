@@ -177,6 +177,35 @@ nav a.active,nav a:hover{background:rgba(255,255,255,.65);box-shadow:inset 0 1px
 @media(max-width:760px){.section-head{flex-wrap:wrap}.library-tools{width:100%;justify-content:flex-start}.header-actions{flex-wrap:wrap}.integration-hero{align-items:flex-start;gap:12px;flex-wrap:wrap}}
 @media(prefers-reduced-motion:reduce){.service-card,.automation-card,.connect-card,.update-card,.setup-card,.reading-book,.discover-book,.all-book-card,.connector-card,.unmatched-card,.btn,.small-btn,.filter,.period-tab,.field button{transition:none!important;transform:none!important}}
 
+.sync-week-chart{display:flex;align-items:stretch;gap:10px;min-height:144px;padding:18px 20px;background:var(--glass-surface);border:1px solid var(--glass-stroke);border-radius:18px;box-shadow:var(--glass-depth);backdrop-filter:blur(22px) saturate(1.35);-webkit-backdrop-filter:blur(22px) saturate(1.35)}
+.sync-day{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px;min-width:0}.sync-bar-wrap{height:82px;width:min(30px,70%);display:flex;align-items:flex-end;overflow:hidden;border-radius:9px;background:rgba(120,130,145,.1)}.sync-bar-wrap i{display:block;width:100%;min-height:3px;border-radius:8px;background:linear-gradient(180deg,#8dd6c2,#168c79);box-shadow:0 2px 12px rgba(22,140,121,.2)}.sync-day b{font-size:10px;color:var(--ink)}.sync-day small{font-size:9px;color:var(--muted)}
+.reader-setup-guide{margin-top:24px;padding-top:2px}
+@media(max-width:700px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.sync-week-chart{gap:5px;padding:14px 10px}}
+
+/* OLED mode follows macOS appearance: true black canvas with restrained glass. */
+@media(prefers-color-scheme:dark){
+ :root{--ink:#f5f5f7;--muted:#a1a1a6;--line:#29292b;--paper:#000;--glass-surface:rgba(17,17,19,.82);--glass-raised:rgba(28,28,30,.92);--glass-stroke:rgba(255,255,255,.12);--glass-depth:0 12px 36px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.075)}
+ body{background:#000;color:#f5f5f7}
+ main{background:transparent}
+ .sidebar{background:rgba(8,8,9,.9);border-right-color:#242426;box-shadow:8px 0 28px rgba(0,0,0,.45)}
+ .host,.secure,.stat,.service-card,.automation-card,.connect-card,.details-card,.table-card,.activity-card,.note,.update-card,.reading-book,.discover-book,.all-book-card,.connector-card,.unmatched-card,.integration-hero,.books-hero,.setup-card,.setup-hero,.paste-error,.hardcover-background,.epub-drop{background:rgba(16,16,18,.82);border-color:rgba(255,255,255,.1);box-shadow:var(--glass-depth)}
+ .hero,.discover-banner{background:linear-gradient(125deg,rgba(19,25,31,.96),rgba(10,12,14,.94));border-color:rgba(255,255,255,.12);box-shadow:0 16px 40px rgba(0,0,0,.5),inset 0 1px rgba(255,255,255,.07)}
+ .btn.secondary,.small-btn,.filter,.period-tab,.field button,.library-tools select,.view-switch,.readwise-actions input,.setup-field input,.setup-field select,.setup-field textarea,.book-search,.unmatched-action select,.paste-error textarea{background:rgba(30,30,32,.82);border-color:rgba(255,255,255,.13);color:#f5f5f7;box-shadow:0 3px 12px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.07)}
+ .btn.primary{background:rgba(10,132,255,.88);border-color:rgba(255,255,255,.22);color:white}
+ .btn.white{background:rgba(38,38,40,.9);border-color:rgba(255,255,255,.14);color:#f5f5f7}
+ .btn:hover,.small-btn:hover,.filter:hover,.period-tab:hover,.field button:hover{box-shadow:0 7px 20px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.12)}
+ nav a{color:#b7b7bd}nav a.active,nav a:hover{background:rgba(255,255,255,.09);color:#fff;box-shadow:inset 0 1px rgba(255,255,255,.08)}
+ .table-head,.service-row,.event{background:rgba(255,255,255,.025)}
+ .all-book-meta b,.all-book-meta span,.all-book-meta small,.setup-field,.folder-choice code,.row-address,.field code,.details-card code{color:#eeeef0}
+ .section-head p,header p,.hint,.book-taxonomy,.updated{color:#a1a1a6}
+ .book-count,.setup-card-head>span,.service-icon,.connect-icon,.epub-drop-icon{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.12);color:#e5eef5}
+ .book-details dd{color:#e5e5e7}.book-details dt,.book-details summary{color:#a1a1a6}
+ .cover-fallback{background:linear-gradient(145deg,#202326,#111416);border-color:rgba(255,255,255,.13);color:#dce6ea}
+ .cover-fallback span{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.12);box-shadow:none}
+ .finished-label{color:#70d7a4!important}.book-finished{background:rgba(24,40,31,.68)!important}
+ .toast{background:rgba(24,24,26,.94);border-color:rgba(255,255,255,.13)}
+}
+
 /* Unified, quieter glass surfaces and responsive macOS split-view sizing. */
 :root{--glass-surface:rgba(255,255,255,.58);--glass-raised:rgba(255,255,255,.76);--glass-stroke:rgba(255,255,255,.72);--glass-depth:0 12px 34px rgba(31,45,62,.07),inset 0 1px 0 rgba(255,255,255,.8)}
 body{background:radial-gradient(ellipse at 12% 0%,rgba(215,228,239,.62),transparent 38%),radial-gradient(ellipse at 92% 4%,rgba(224,235,231,.5),transparent 33%),#f4f6f8;background-attachment:fixed}
