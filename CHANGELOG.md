@@ -1,3 +1,8 @@
+## 0.1.23
+
+- Automatically hide old log errors after the same job records a successful recovery, and age out issues after seven days in diagnostic exports.
+- Make Setup and Reader Setup controls follow the selected OLED, System, or Light theme consistently.
+
 ## 0.1.22
 
 - Stop reporting historical 20-second Calibre bridge timeouts after the timeout fix is installed.

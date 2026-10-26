@@ -1318,13 +1318,17 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let installedAt=fileModified(Bundle.main.bundleURL.path) ?? .distantPast
         for (source,path) in sources {
             let modified=fileModified(path)
-            for line in tail(path,lines:120) {
+            let lines=tail(path,lines:240)
+            let recoveredAt=latestSuccessfulRun(in:lines,logPath:path)
+            for line in lines.suffix(120) {
                 let level=eventLevel(line)
                 guard level != nil else { continue }
                 let stamped=eventDate(line)
                 let eventTime=stamped ?? modified
                 guard let eventTime, Date().timeIntervalSince(eventTime) < (stamped == nil ? 86400 : 172800) else { continue }
                 if isResolvedBeforeThisBuild(line,eventTime,installedAt:installedAt) { continue }
+                if let recoveredAt,recoveredAt > eventTime,
+                   !line.localizedCaseInsensitiveContains("UNMATCHED") { continue }
                 events.append(["source":source,"level":level!,"message":humanLogSummary(line),"date":iso(eventTime)])
             }
         }
@@ -1801,12 +1805,14 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         for file in logFiles {
             let fileDate=fileModified(file.path)
             let lines=tail(file.path,lines:240)
+            let recoveredAt=latestSuccessfulRun(in:lines,logPath:file.path)
             for line in lines {
                 guard !reportsNoIssues(line) else { continue }
                 if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
                     guard let issueDate=eventDate(line) ?? fileDate,
                           issueDate >= cutoff,issueDate <= now.addingTimeInterval(300),
                           !isResolvedBeforeThisBuild(line,issueDate,installedAt:installedAt) else { continue }
+                    if let recoveredAt,recoveredAt > issueDate { continue }
                     let summary=humanLogSummary("\(file.lastPathComponent): \(line)")
                     let key=diagnosticFingerprint(summary)
                     if var issue=uniqueIssues[key] {
@@ -1956,6 +1962,40 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             && line.localizedCaseInsensitiveContains("calibredb")
             && line.localizedCaseInsensitiveContains("timed out after 20 seconds")
         return isOldCalibreTimeout && date < installedAt
+    }
+
+    /// Returns the timestamp of the most recent successful run recorded by a log.
+    /// Older failures are hidden from current status and diagnostic exports once their
+    /// own process has completed successfully; raw log files remain available for audit.
+    private func latestSuccessfulRun(in lines:[String],logPath:String)->Date? {
+        let name=(logPath as NSString).lastPathComponent.lowercased()
+        for index in lines.indices.reversed() {
+            let line=lines[index]
+            let success:Bool
+            if name.contains("kosync-calibre-bridge") {
+                success=line.localizedCaseInsensitiveContains("BRIDGE END")
+            } else if name.contains("icloud-import") || name.contains("importer") {
+                if line.localizedCaseInsensitiveContains("Import pass beendet") {
+                    let start=max(lines.startIndex,index-16)
+                    let prior=lines[start..<index].reversed()
+                    let failures=prior.first { $0.localizedCaseInsensitiveContains("Fehlgeschlagen:") || $0.localizedCaseInsensitiveContains("failed:") }
+                    success=failures.map { Self.capture(#"(?i)(?:Fehlgeschlagen|failed):\s*(\d+)"#,$0) == "0" } ?? false
+                } else { success=false }
+            } else if name.contains("malware") {
+                success=line.localizedCaseInsensitiveContains("All scanned incoming files are clean")
+                    || line.range(of:#"(?i)\bCLEAN:"#,options:.regularExpression) != nil
+            } else if name.contains("japanese-audit") {
+                success=reportsNoIssues(line)
+            } else if name.contains("duplicate-audit") {
+                success=line.localizedCaseInsensitiveContains("NO EXACT BINARY DUPLICATES")
+            } else if name.contains("restic-backup") {
+                success=line.localizedCaseInsensitiveContains("ICLOUD MIRROR OK")
+            } else {
+                success=false
+            }
+            if success,let date=eventDate(line) { return date }
+        }
+        return nil
     }
 
     private func compactDiagnosticLine(_ source:String)->String {

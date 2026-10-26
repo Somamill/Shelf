@@ -219,6 +219,12 @@ html[data-theme="dark"] .badge.healthy{background:#12332c;color:#71d6b0}html[dat
 html[data-theme="dark"] .table-head,html[data-theme="dark"] .service-row,html[data-theme="dark"] .event,html[data-theme="dark"] .field,html[data-theme="dark"] .card-meta,html[data-theme="dark"] .automation-meta,html[data-theme="dark"] .details-card>div{background:transparent;border-color:#29292b}
 html[data-theme="dark"] .notice{background:#302510;color:#f1cf83;border-color:#574323}html[data-theme="dark"] .notice.ok{background:#102c25;color:#86d7b6;border-color:#204b3e}
 html[data-theme="dark"] .setup-note,html[data-theme="dark"] .setup-hint{background:#191a1c;color:var(--muted)}
+html[data-theme="dark"] .provider-grid label,html[data-theme="dark"] .check-list label{background:rgba(255,255,255,.035);color:#f1f1f3;border-color:#303034}
+html[data-theme="dark"] .provider-grid label:has(input:checked),html[data-theme="dark"] .check-list label:has(input:checked){background:#172326;border-color:#42605b}
+html[data-theme="dark"] .setup-field,html[data-theme="dark"] .folder-choice label{color:#dedee3}
+html[data-theme="dark"] .setup-field small{color:#a1a1a6}
+html[data-theme="dark"] .setup-field input,html[data-theme="dark"] .setup-field select,html[data-theme="dark"] .setup-field textarea{background:#111113;color:#f5f5f7;border-color:#3a3a3d}
+html[data-theme="dark"] .setup-field input:focus,html[data-theme="dark"] .setup-field select:focus,html[data-theme="dark"] .setup-field textarea:focus{border-color:#4d9cf8;box-shadow:0 0 0 3px #0a84ff30}
 html[data-theme="dark"] .cover-fallback{background:linear-gradient(145deg,#25282b,#131516);color:#dce6ea;border-color:#45494c}html[data-theme="dark"] .cover-fallback span{background:#ffffff0d;border-color:#ffffff1b}
 html[data-theme="dark"] .finished-label{color:#77d8a6!important}html[data-theme="dark"] .book-finished{background:#12251b!important}
 html[data-theme="dark"] .filter.on,html[data-theme="dark"] .view-switch button.active{background:#18333a;color:#8fd8ce;border-color:#315551}
@@ -242,6 +248,11 @@ html[data-theme="light"] .hero,html[data-theme="light"] .discover-banner{backgro
 html[data-theme="light"] .hero h2,html[data-theme="light"] .hero p,html[data-theme="light"] .hero .eyebrow{color:white}
 html[data-theme="light"] .btn.primary{background:#3478f6;color:white;border:1px solid rgba(255,255,255,.25)}
 html[data-theme="light"] .btn.white{background:rgba(255,255,255,.92);color:#294d93}
+html[data-theme="light"] .provider-grid label,html[data-theme="light"] .check-list label{background:rgba(255,255,255,.57);color:#30343a;border-color:rgba(31,41,55,.12)}
+html[data-theme="light"] .provider-grid label:has(input:checked),html[data-theme="light"] .check-list label:has(input:checked){background:rgba(232,241,252,.88);border-color:#9bb8d8}
+html[data-theme="light"] .setup-field,html[data-theme="light"] .folder-choice label{color:#37465a}
+html[data-theme="light"] .setup-field small{color:#737780}
+html[data-theme="light"] .setup-field input:focus,html[data-theme="light"] .setup-field select:focus,html[data-theme="light"] .setup-field textarea:focus{border-color:#77a8de;box-shadow:0 0 0 3px #d9eaff}
 html[data-theme="light"] .table-head{background:rgba(244,246,249,.72)}
 html[data-theme="light"] .notice{background:#fff6e3;color:#805a10;border-color:#f1dfb8}html[data-theme="light"] .notice.ok{background:#eaf7f2;color:#28735f;border-color:#cfe9df}
 html[data-theme="light"] .finished-label{color:#26764f!important}.book-finished{background:rgba(239,247,242,.68)!important}
