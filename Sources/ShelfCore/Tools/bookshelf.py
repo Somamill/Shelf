@@ -24,6 +24,7 @@ def main():
         rows = connection.execute('''
             SELECT b.id, b.title, b.path, b.has_cover, b.timestamp,
                    p.value AS progress,
+                   done.value AS device_finished,
                    (SELECT group_concat(a.name, ' · ')
                       FROM books_authors_link l JOIN authors a ON a.id=l.author
                      WHERE l.book=b.id) AS authors,
@@ -36,6 +37,7 @@ def main():
                    (SELECT group_concat(d.format, ',') FROM data d WHERE d.book=b.id) AS formats
               FROM books b
               LEFT JOIN custom_column_1 p ON p.book=b.id
+              LEFT JOIN custom_column_4 done ON done.book=b.id
              ORDER BY datetime(b.timestamp) DESC, b.id DESC
         ''').fetchall()
     finally:
@@ -73,7 +75,8 @@ def main():
         # Device percentages may stop short of 100% because of end matter or
         # differing page counts. Shelf treats 97% as complete without changing
         # Calibre's saved progress value.
-        if progress is not None and progress >= 0.97:
+        marked_finished = str(row['device_finished'] or '').strip().lower() in {'1', 'true', 'yes'}
+        if marked_finished or (progress is not None and progress >= 0.97):
             book['finished'] = True
             finished.append(book)
         elif progress is not None and progress > 0:

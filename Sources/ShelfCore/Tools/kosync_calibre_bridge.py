@@ -592,8 +592,10 @@ def main():
 
             pct100 = max(0, min(100, round(pct * 100)))
 
-            status = "Finished" if pct >= 0.999 else "Reading"
-            finished = "true" if pct >= 0.999 else "false"
+            # Treat the last few percent as complete: different readers count
+            # end matter and pages differently, and some stop at 97–99%.
+            status = "Finished" if pct >= 0.97 else "Reading"
+            finished = "true" if pct >= 0.97 else "false"
 
             update_ok = True
             for column, value in [
