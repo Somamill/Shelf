@@ -1,3 +1,10 @@
+## 0.1.14
+
+- Treat 97% reading progress as finished and remove those books from Continue reading.
+- Correct clean Japanese EPUB audit reports so zero-error summaries do not appear as Attention.
+- Improve macOS window resizing and restore the current dock icon registration.
+- Refresh the dashboard surfaces with a consistent, restrained glass treatment.
+
 # Changelog
 
 ## 0.1.13

@@ -43,6 +43,7 @@ def main():
 
     books = []
     reading = []
+    finished = []
     for row in rows:
         raw = row['progress']
         try:
@@ -69,7 +70,13 @@ def main():
             'coverPath': str(cover) if cover and cover.is_file() else '',
         }
         books.append(book)
-        if progress is not None and 0 < progress < 0.999:
+        # Device percentages may stop short of 100% because of end matter or
+        # differing page counts. Shelf treats 97% as complete without changing
+        # Calibre's saved progress value.
+        if progress is not None and progress >= 0.97:
+            book['finished'] = True
+            finished.append(book)
+        elif progress is not None and progress > 0:
             reading.append(book)
 
     try:
@@ -88,6 +95,7 @@ def main():
     print(json.dumps({
         'total': total,
         'reading': sorted(reading, key=lambda b: b['progress'] or 0, reverse=True),
+        'finished': sorted(finished, key=lambda b: b['progress'] or 0, reverse=True),
         'recent': books[:10],
         'allBooks': books,
         'unmatchedProgress': unmatched,

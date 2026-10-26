@@ -249,14 +249,18 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let controller = WKUserContentController()
         controller.add(WeakScriptMessageHandler(self), name:"dashboard")
         config.userContentController = controller
-        webView = DroppableWebView(frame:NSRect(x:0,y:0,width:1440,height:900),configuration:config)
+        webView = DroppableWebView(frame:NSRect(x:0,y:0,width:1240,height:800),configuration:config)
         (webView as? DroppableWebView)?.onEPUBDrop = { [weak self] urls in self?.queueEPUBImports(urls) }
         webView.autoresizingMask=[.width,.height]
         webView.navigationDelegate=self
-        window = NSWindow(contentRect:NSRect(x:0,y:0,width:1440,height:940),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+        window = NSWindow(contentRect:NSRect(x:0,y:0,width:1240,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title = "Shelf"
         window.appearance = NSAppearance(named:.aqua)
-        window.minSize = NSSize(width:1050,height:700)
+        // Allow practical Split View sizing so native edge snapping works on
+        // MacBook screens without forcing the dashboard above half-screen width.
+        window.minSize = NSSize(width:720,height:520)
+        window.setFrameAutosaveName("ShelfMainWindow")
+        window.tabbingMode = .disallowed
         window.center()
         window.isReleasedWhenClosed=false
         let container=NSView(frame:NSRect(x:0,y:0,width:1440,height:900))
@@ -1051,8 +1055,13 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                     guard let self else { return }
                     self.loadBooks()
                     self.loadHardcoverShelf()
+                    let lines=self.tail("\(self.logsPath)/calibre-icloud-import.log",lines:64)
+                    let lastImport=lines.lastIndex(where:{$0.contains("Import: ")}) ?? lines.endIndex
+                    let heldForRepair=lines[lastImport...].contains(where:{$0.contains("HELD FOR EPUB REPAIR")})
                     if importResult.code == 0 {
                         self.notify("Import pass finished · Hardcover and Continue reading refreshed.")
+                    } else if heldForRepair {
+                        self.notify("EPUBCheck found a structural issue · the original is safe in Calibre Imported / Needs EPUB Repair.")
                     } else {
                         self.notify("The files are safe in the iCloud import folder; the importer logged an issue and will retry on its next run.")
                     }
@@ -1909,6 +1918,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func eventLevel(_ line:String)->String? {
+        if reportsNoIssues(line) { return nil }
         if line.range(of:#"broken pipe|failed login attempt"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Warning" }
         if line.range(of:#"\b(error|failed|failure|fatal|exception|denied)\b"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Error" }
         if line.range(of:#"\b(warning|warn|unmatched|skipped)\b"#,options:.regularExpression.union(.caseInsensitive)) != nil { return "Warning" }
@@ -1927,7 +1937,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func reportsNoIssues(_ line:String)->Bool {
-        line.range(of:#"(?i)\bno errors or warnings detected\b|\bmessages:\s*0\s+fatals?\s*/\s*0\s+errors?\s*/\s*0\s+warnings?\b"#,options:.regularExpression) != nil
+        line.range(of:#"(?i)\bno errors or warnings detected\b|\bmessages:\s*0\s+fatals?\s*/\s*0\s+errors?\s*/\s*0\s+warnings?\b|\bEPUB(?:Check)?\s+(?:errors?|warnings?)\s*[:=]\s*0\b"#,options:.regularExpression) != nil
     }
 
     private func diagnosticFingerprint(_ source:String)->String {
