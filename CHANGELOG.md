@@ -1,3 +1,8 @@
+## 0.1.17
+
+- Add a visible System / OLED black appearance picker so OLED mode works even if WKWebView misses the macOS appearance signal.
+- Set the dashboard document color scheme to support both light and dark native controls.
+
 ## 0.1.16
 
 - Combine reader setup with Setup and scheduled jobs with service operations.

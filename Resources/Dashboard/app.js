@@ -13,6 +13,8 @@ let data=null,activeFilter='all',activePeriod='weekly',booksData=null,discoveryC
 let bookSearch='',libraryView=localStorage.getItem('shelfLibraryView')||'grid',librarySort=localStorage.getItem('shelfLibrarySort')||'title';
 const post=o=>window.webkit.messageHandlers.dashboard.postMessage(o);
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function setAppearance(value){const mode=value==='oled'?'oled':'system';localStorage.setItem('shelfAppearance',mode);document.documentElement.dataset.appearance=mode;const picker=document.getElementById('appearanceChoice');if(picker)picker.value=mode}
+setAppearance(localStorage.getItem('shelfAppearance')||'oled');
 function refresh(){post({type:'refresh'})}
 function showPage(id){
   activePage=id;
