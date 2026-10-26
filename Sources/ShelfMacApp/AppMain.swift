@@ -1267,7 +1267,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             } else {
                 let maxAge=(interval ?? 3600)*2.2+180
                 let age=mod.map { Date().timeIntervalSince($0) }
-                let errorLine=lastLine.range(of:#"error|failed|failure|denied|exception"#,options:.regularExpression.union(.caseInsensitive)) != nil
+                let errorLine = !reportsNoIssues(lastLine) && lastLine.range(of:#"error|failed|failure|denied|exception"#,options:.regularExpression.union(.caseInsensitive)) != nil
                 if let age, age < maxAge {
                     state=(errorLine || (agent?.lastExit ?? 0) != 0) ? "warning" : "healthy"
                 }
@@ -1780,7 +1780,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         Library: \(libraryPath)
         Import folder: \(importPath)
 
-        Contents: current dashboard state and the single most recent distinct issue.
+        Contents: current dashboard state and the single most recent distinct issue from the last 7 days.
         Repeated failures are counted once. Full logs, book contents, and credentials are not included.
         Passwords, auth values, tokens, and secret fields are redacted. The bundle is created locally;
         it is not sent to an LLM or any other service.
@@ -1790,19 +1790,27 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let logDirectory=URL(fileURLWithPath:logsPath,isDirectory:true)
         let logFiles=(try? fm.contentsOfDirectory(at:logDirectory,includingPropertiesForKeys:nil))?.filter { $0.pathExtension.caseInsensitiveCompare("log") == .orderedSame }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending } ?? []
         let matcher=try NSRegularExpression(pattern:#"(?i)\b(error|failed|failure|fatal|exception|traceback|interruptederror|permission denied|operation not permitted)\b|already running"#)
-        var uniqueIssues=[String:(message:String,count:Int)]()
+        var uniqueIssues=[String:(message:String,count:Int,latest:Date)]()
+        let now=Date(),cutoff=now.addingTimeInterval(-7*86400)
         for file in logFiles {
+            let fileDate=fileModified(file.path)
             let lines=tail(file.path,lines:240)
             for line in lines {
+                guard !reportsNoIssues(line) else { continue }
                 if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
+                    guard let issueDate=eventDate(line) ?? fileDate,
+                          issueDate >= cutoff,issueDate <= now.addingTimeInterval(300) else { continue }
                     let summary=compactDiagnosticLine("\(file.lastPathComponent): \(line)")
                     let key=diagnosticFingerprint(summary)
-                    if var issue=uniqueIssues[key] { issue.count += 1; uniqueIssues[key]=issue }
-                    else { uniqueIssues[key]=(summary,1) }
+                    if var issue=uniqueIssues[key] {
+                        issue.count += 1
+                        issue.latest=max(issue.latest,issueDate)
+                        uniqueIssues[key]=issue
+                    } else { uniqueIssues[key]=(summary,1,issueDate) }
                 }
             }
         }
-        let issueLines=uniqueIssues.values.sorted { $0.message < $1.message }.prefix(1).map { issue in
+        let issueLines=uniqueIssues.values.sorted { $0.latest > $1.latest }.prefix(1).map { issue in
             issue.count > 1 ? "Repeated \(issue.count) times: \(issue.message)" : issue.message
         }
         let report=issueLines.isEmpty ? "No recent errors found in the collected log tails." : issueLines.joined(separator:"\n")
@@ -1916,6 +1924,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         line=line.replacingOccurrences(of:#"\s+"#,with:" ",options:.regularExpression).trimmingCharacters(in:.whitespacesAndNewlines)
         if line.count>240 { line=String(line.prefix(237))+"…" }
         return line
+    }
+
+    private func reportsNoIssues(_ line:String)->Bool {
+        line.range(of:#"(?i)\bno errors or warnings detected\b|\bmessages:\s*0\s+fatals?\s*/\s*0\s+errors?\s*/\s*0\s+warnings?\b"#,options:.regularExpression) != nil
     }
 
     private func diagnosticFingerprint(_ source:String)->String {

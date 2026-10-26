@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- Treat a zero-error EPUB audit summary as healthy instead of matching the word “errors” as a failure.
+- Export only issues from the last seven days and choose the newest distinct issue instead of sorting messages alphabetically.
+
 ## 0.1.12
 
 - Make background Keychain reads non-interactive with `LAContext` and cache successful lookups so periodic dashboard refreshes do not open repeated access dialogs. User-started sync actions can still request access when needed.
