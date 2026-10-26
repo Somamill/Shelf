@@ -10,11 +10,17 @@ const titles={
   updates:['Updates','Official release checks for Calibre and CrossPoint.']
 };
 let data=null,activeFilter='all',activePeriod='weekly',booksData=null,discoveryCache={},toastTimer,activePage='overview';
-let bookSearch='',libraryView=localStorage.getItem('shelfLibraryView')||'grid',librarySort=localStorage.getItem('shelfLibrarySort')||'title';
+function preferenceGet(key){try{return localStorage.getItem(key)}catch(_){return null}}
+function preferenceSet(key,value){try{localStorage.setItem(key,value)}catch(_){}}
+let bookSearch='',libraryView=preferenceGet('shelfLibraryView')||'grid',librarySort=preferenceGet('shelfLibrarySort')||'title';
 const post=o=>window.webkit.messageHandlers.dashboard.postMessage(o);
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function setAppearance(value){const mode=value==='oled'?'oled':'system';localStorage.setItem('shelfAppearance',mode);document.documentElement.dataset.appearance=mode;const picker=document.getElementById('appearanceChoice');if(picker)picker.value=mode}
-setAppearance(localStorage.getItem('shelfAppearance')||'oled');
+let appearancePreference=preferenceGet('shelfAppearance')==='system'?'system':'oled';
+const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
+function applyAppearance(){const dark=appearancePreference==='oled'||systemAppearance.matches;document.documentElement.dataset.appearance=appearancePreference;document.documentElement.dataset.theme=dark?'dark':'light';const picker=document.getElementById('appearanceChoice');if(picker)picker.value=appearancePreference}
+function setAppearance(value){appearancePreference=value==='system'?'system':'oled';preferenceSet('shelfAppearance',appearancePreference);applyAppearance()}
+applyAppearance();
+if(systemAppearance.addEventListener)systemAppearance.addEventListener('change',()=>{if(appearancePreference==='system')applyAppearance()});else if(systemAppearance.addListener)systemAppearance.addListener(()=>{if(appearancePreference==='system')applyAppearance()});
 function refresh(){post({type:'refresh'})}
 function showPage(id){
   activePage=id;
@@ -107,8 +113,8 @@ function coreBookTitle(s){return normalizedBookTitle(String(s||'').split(/\s*[:ï
 function normalizedAuthors(s){return normalizedBookTitle(Array.isArray(s)?s.join(' '):s)}
 function sameWork(local,external){const lt=coreBookTitle(local.title),ht=coreBookTitle(external.title),la=normalizedAuthors(local.authors).split(' ').sort().join(' '),ha=normalizedAuthors(external.author||external.authors).split(' ').sort().join(' ');return !!lt&&lt===ht&&!!la&&!!ha&&la===ha}
 function unifiedBooks(){const local=booksData?.allBooks||[],external=hardcoverShelfDataCache?.books||[],out=local.map(x=>({...x})),used=new Set();for(const h of external){const idx=out.findIndex((x,i)=>!used.has(i)&&sameWork(x,h));if(idx>=0){out[idx].hardcover=h;used.add(idx)}else{const prior=out.find(x=>x.hardcoverOnly&&sameWork(x,h));if(!prior)out.push({id:null,title:h.title,authors:h.author||h.authors||'',coverURL:h.coverURL,hardcover:h,hardcoverOnly:true})}}return out}
-function setLibraryView(view){libraryView=view==='list'?'list':'grid';localStorage.setItem('shelfLibraryView',libraryView);renderAllBooks()}
-function setLibrarySort(sort){librarySort=['title','author','progress','added'].includes(sort)?sort:'title';localStorage.setItem('shelfLibrarySort',librarySort);renderAllBooks()}
+function setLibraryView(view){libraryView=view==='list'?'list':'grid';preferenceSet('shelfLibraryView',libraryView);renderAllBooks()}
+function setLibrarySort(sort){librarySort=['title','author','progress','added'].includes(sort)?sort:'title';preferenceSet('shelfLibrarySort',librarySort);renderAllBooks()}
 function renderAllBooks(){
  const query=bookSearch.toLocaleLowerCase(),all=unifiedBooks().filter(b=>`${b.title} ${b.authors} ${b.series||''} ${b.tags||''} ${b.publisher||''} ${b.identifiers||''} ${b.languages||''} ${b.description||''} ${(b.customMetadata||[]).map(x=>x.value).join(' ')}`.toLocaleLowerCase().includes(query));
  const local=all.filter(b=>!b.hardcoverOnly),external=all.filter(b=>b.hardcoverOnly);

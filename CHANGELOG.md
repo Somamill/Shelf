@@ -1,3 +1,10 @@
+## 0.1.19
+
+- Unify light appearance so navigation, cards, controls and book views share one balanced palette.
+- Make OLED mode consistently black across all dashboard pages, cards, forms and controls.
+- Make System appearance follow macOS changes immediately and safely handle unavailable local preferences.
+- Remove conflicting legacy theme layers that caused light and dark surfaces to mix.
+
 ## 0.1.18
 
 - Remove all runtime Keychain access from Shelf to prevent repeated Keychain dialogs.
