@@ -1254,9 +1254,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let runLines=logPath.map { tail($0,lines:240) } ?? []
             let lastLine=runLines.last ?? ""
             let recoveredAt=logPath.flatMap { latestSuccessfulRun(in:runLines,logPath:$0) }
-            let latestFailure=runLines.reversed().first { line in
-                guard eventLevel(line) == "Error" else { return false }
-                guard let date=eventDate(line) else { return true }
+            let latestFailure=runLines.indices.reversed().first { index in
+                guard eventLevel(runLines[index]) == "Error" else { return false }
+                guard let date=eventDate(at:index,in:runLines,fallback:mod) else { return true }
                 if Date().timeIntervalSince(date) > 7*86400 { return false }
                 return recoveredAt.map { $0 <= date } ?? true
             }
@@ -1329,12 +1329,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let modified=fileModified(path)
             let lines=tail(path,lines:240)
             let recoveredAt=latestSuccessfulRun(in:lines,logPath:path)
-            for line in lines.suffix(120) {
+            for index in max(0,lines.count-120)..<lines.count {
+                let line=lines[index]
                 let level=eventLevel(line)
                 guard level != nil else { continue }
-                let stamped=eventDate(line)
-                let eventTime=stamped ?? modified
-                guard let eventTime, Date().timeIntervalSince(eventTime) < (stamped == nil ? 86400 : 172800) else { continue }
+                let eventTime=eventDate(at:index,in:lines,fallback:modified)
+                guard let eventTime, Date().timeIntervalSince(eventTime) < 172800 else { continue }
                 if isResolvedBeforeThisBuild(line,eventTime,installedAt:installedAt) { continue }
                 if let recoveredAt,recoveredAt > eventTime,
                    !line.localizedCaseInsensitiveContains("UNMATCHED") { continue }
@@ -1815,10 +1815,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let fileDate=fileModified(file.path)
             let lines=tail(file.path,lines:240)
             let recoveredAt=latestSuccessfulRun(in:lines,logPath:file.path)
-            for line in lines {
+            for (index,line) in lines.enumerated() {
                 guard !reportsNoIssues(line) else { continue }
                 if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
-                    guard let issueDate=eventDate(line) ?? fileDate,
+                    guard let issueDate=eventDate(at:index,in:lines,fallback:fileDate),
                           issueDate >= cutoff,issueDate <= now.addingTimeInterval(300),
                           !isResolvedBeforeThisBuild(line,issueDate,installedAt:installedAt) else { continue }
                     if let recoveredAt,recoveredAt > issueDate { continue }
@@ -2002,7 +2002,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             } else {
                 success=false
             }
-            if success,let date=eventDate(line) { return date }
+            if success,let date=eventDate(at:index,in:lines,fallback:nil) { return date }
         }
         return nil
     }
@@ -2048,6 +2048,20 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let f=DateFormatter(); f.locale=Locale(identifier:"en_US_POSIX"); f.timeZone=TimeZone.current
         f.dateFormat=stamp.contains("T") ? "yyyy-MM-dd'T'HH:mm:ss" : "yyyy-MM-dd HH:mm:ss"
         return f.date(from:stamp)
+    }
+
+    /// Many scripts timestamp a run header and leave the following detail lines
+    /// unstamped. Reuse the nearest preceding timestamp instead of treating the
+    /// file's modification time as the event time (which makes old errors look new).
+    private func eventDate(at index:Int,in lines:[String],fallback:Date?)->Date? {
+        guard !lines.isEmpty,index >= 0,index < lines.count else { return fallback }
+        var cursor=index
+        for _ in 0..<min(48,index+1) {
+            if let date=eventDate(lines[cursor]) { return date }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return fallback
     }
 
     private func formatInterval(_ value:Double)->String {

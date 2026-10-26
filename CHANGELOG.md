@@ -1,3 +1,7 @@
+## 0.1.25
+
+- Use the nearest preceding run timestamp for log entries without their own timestamp, preventing old multiline errors from appearing newly active.
+
 ## 0.1.24
 
 - Clear a stale launch-agent failure status when the bridge log proves a later successful run, so an old timeout cannot keep the bridge marked as an error.
