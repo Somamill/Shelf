@@ -21,8 +21,32 @@ def main():
     connection.row_factory = sqlite3.Row
     try:
         total = connection.execute('SELECT count(*) FROM books').fetchone()[0]
+        custom_metadata = connection.execute(
+            'SELECT id, label, name FROM custom_columns ORDER BY id'
+        ).fetchall()
+        custom_expressions = []
+        for column in custom_metadata:
+            column_id = int(column['id'])
+            table = f'custom_column_{column_id}'
+            if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone():
+                continue
+            table_fields = {field['name'] for field in connection.execute(f'PRAGMA table_info({table})')}
+            if 'book' in table_fields:
+                expression = f'(SELECT cm.value FROM {table} cm WHERE cm.book=b.id)'
+            else:
+                link = f'books_custom_column_{column_id}_link'
+                expression = (
+                    f'(SELECT group_concat(cm.value, \' · \') FROM {link} ln '
+                    f'JOIN {table} cm ON cm.id=ln.value WHERE ln.book=b.id)'
+                )
+            custom_expressions.append(f'{expression} AS custom_{column_id}')
+        custom_select = ',\n'.join(custom_expressions)
+        custom_prefix = f'{custom_select},\n                   ' if custom_select else ''
         rows = connection.execute('''
-            SELECT b.id, b.title, b.path, b.has_cover, b.timestamp,
+            SELECT b.id, b.title, b.sort AS title_sort, b.author_sort, b.uuid,
+                   b.path, b.has_cover, b.timestamp, b.last_modified,
                    p.value AS progress,
                    done.value AS device_finished,
                    (SELECT group_concat(a.name, ' · ')
@@ -34,12 +58,23 @@ def main():
                    (SELECT group_concat(t.name, ' · ')
                       FROM books_tags_link l JOIN tags t ON t.id=l.tag
                      WHERE l.book=b.id) AS tags,
+                   (SELECT p.name FROM books_publishers_link l JOIN publishers p ON p.id=l.publisher WHERE l.book=b.id) AS publisher,
+                   (SELECT group_concat(lang.lang_code, ', ')
+                      FROM books_languages_link l JOIN languages lang ON lang.id=l.lang_code
+                     WHERE l.book=b.id) AS languages,
+                   (SELECT group_concat(i.type || ': ' || i.val, ' · ')
+                      FROM identifiers i WHERE i.book=b.id) AS identifiers,
+                   (SELECT group_concat(r.rating, ', ')
+                      FROM books_ratings_link l JOIN ratings r ON r.id=l.rating
+                     WHERE l.book=b.id) AS rating,
+                   c.text AS comments, b.pubdate, b.series_index,
                    (SELECT group_concat(d.format, ',') FROM data d WHERE d.book=b.id) AS formats
               FROM books b
               LEFT JOIN custom_column_1 p ON p.book=b.id
               LEFT JOIN custom_column_4 done ON done.book=b.id
-             ORDER BY datetime(b.timestamp) DESC, b.id DESC
-        ''').fetchall()
+              LEFT JOIN comments c ON c.book=b.id
+              ORDER BY datetime(b.timestamp) DESC, b.id DESC
+        '''.replace('SELECT b.id,', f'SELECT {custom_prefix}b.id,', 1)).fetchall()
     finally:
         connection.close()
 
@@ -66,6 +101,24 @@ def main():
             'authors': row['authors'] or 'Unknown author',
             'series': row['series'] or '',
             'tags': row['tags'] or '',
+            'publisher': row['publisher'] or '',
+            'languages': row['languages'] or '',
+            'identifiers': row['identifiers'] or '',
+            'rating': row['rating'] or '',
+            'description': row['comments'] or '',
+            'published': row['pubdate'] or '',
+            'seriesIndex': row['series_index'],
+            'titleSort': row['title_sort'] or '',
+            'authorSort': row['author_sort'] or '',
+            'uuid': row['uuid'] or '',
+            'libraryPath': row['path'] or '',
+            'modified': row['last_modified'] or '',
+            'customMetadata': [
+                {'label': column['name'], 'value': str(row[f'custom_{int(column["id"])}'])}
+                for column in custom_metadata
+                if row[f'custom_{int(column["id"])}'] is not None
+                and str(row[f'custom_{int(column["id"])}']).strip()
+            ],
             'progress': progress,
             'formats': row['formats'] or '',
             'added': row['timestamp'] or '',

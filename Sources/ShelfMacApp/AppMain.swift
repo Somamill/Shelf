@@ -169,11 +169,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         keychainCacheLock.lock()
         defer { keychainCacheLock.unlock() }
         if keychainCredentialLookups.contains(key) { return keychainCredentialCache[key] }
-        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: "app.shelf.dashboard",
-                                    kSecAttrAccount as String: key,
-                                    kSecReturnData as String: true,
-                                    kSecMatchLimit as String: kSecMatchLimitOne]
+        let accessIdentity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                             kSecAttrService as String: "app.shelf.dashboard",
+                                             kSecAttrAccount as String: key]
+        var query=accessIdentity
+        query[kSecReturnData as String]=true
+        query[kSecMatchLimit as String]=kSecMatchLimitOne
         let authenticationContext=LAContext()
         authenticationContext.interactionNotAllowed = !allowInteraction
         query[kSecUseAuthenticationContext as String]=authenticationContext
@@ -185,7 +186,24 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         keychainCredentialLookups.insert(key)
         keychainCredentialCache[key]=value
+        setShelfKeychainAccess(accessIdentity,key:key)
         return value
+    }
+
+    // Keep the access list tied to Shelf's stable signing identity. Ad-hoc
+    // rebuilds change identity and are a common cause of recurring prompts.
+    private func shelfKeychainAccess(_ key:String)->SecAccess? {
+        var app:SecTrustedApplication?
+        let trustedStatus=Bundle.main.bundleURL.path.withCString { SecTrustedApplicationCreateFromPath($0,&app) }
+        guard trustedStatus == errSecSuccess,let app else { return nil }
+        var access:SecAccess?
+        let accessStatus=SecAccessCreate("Shelf · \(key)" as CFString,[app] as CFArray,&access)
+        return accessStatus == errSecSuccess ? access : nil
+    }
+
+    private func setShelfKeychainAccess(_ identity:[String:Any],key:String) {
+        guard let access=shelfKeychainAccess(key) else { return }
+        SecItemUpdate(identity as CFDictionary,[kSecAttrAccess as String:access] as CFDictionary)
     }
 
     @discardableResult
@@ -198,6 +216,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let data = Data(value.utf8)
         let update = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if update == errSecSuccess {
+            setShelfKeychainAccess(identity,key:key)
             keychainCredentialCache[key]=value
             keychainCredentialLookups.insert(key)
             return true
@@ -205,6 +224,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         var add = identity
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        if let access=shelfKeychainAccess(key) {
+            add[kSecAttrAccess as String]=access
+        }
         let saved=SecItemAdd(add as CFDictionary, nil) == errSecSuccess
         if saved {
             keychainCredentialCache[key]=value
@@ -489,9 +511,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
             let reading=(payload["reading"] as? [[String:Any]] ?? []).map { self.withCover($0) }
             let recent=(payload["recent"] as? [[String:Any]] ?? []).map { self.withCover($0) }
+            let finished=(payload["finished"] as? [[String:Any]] ?? []).map { self.withCover($0) }
             let allBooks=(payload["allBooks"] as? [[String:Any]] ?? []).map { self.withCover($0) }
             payload["reading"]=reading
             payload["recent"]=recent
+            payload["finished"]=finished
             payload["allBooks"]=allBooks
             DispatchQueue.main.async { self.send("bookshelfData",payload) }
         }

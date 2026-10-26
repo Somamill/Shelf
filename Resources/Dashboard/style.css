@@ -130,6 +130,25 @@ nav a:hover{transform:translateX(2px)}
 @media(max-width:700px){main{padding:22px 16px}.connection-grid,.update-grid{grid-template-columns:1fr}.library-tools{gap:6px}.library-tools .btn{padding:8px 9px}.all-books-grid.list-view .all-book-meta{grid-template-columns:minmax(0,1fr) auto}.all-books-grid.list-view .all-book-meta>span,.all-books-grid.list-view .book-taxonomy{grid-column:1}.all-books-grid.list-view .all-book-meta .progress-track{grid-column:1}.all-books-grid.list-view .all-book-meta .small-btn{grid-column:2;grid-row:1 / span 4}.books-hero{gap:12px}.unmatched-action{flex-wrap:wrap}}
 @media(prefers-reduced-transparency:reduce){.sidebar,.library-tools select,.view-switch,.all-books-grid.list-view .all-book-card,.book-search{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--paper)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Quiet, brief transitions; the system reduced-motion preference disables them. */
+.page.visible{animation:shelf-page-enter .24s cubic-bezier(.2,.75,.25,1) both}
+.reading-book,.all-book-card,.library-book,.discover-book{animation:shelf-card-enter .28s cubic-bezier(.2,.75,.25,1) both;transform-origin:50% 92%}
+.reading-book:nth-child(2),.all-book-card:nth-child(2),.library-book:nth-child(2){animation-delay:25ms}
+.reading-book:nth-child(3),.all-book-card:nth-child(3),.library-book:nth-child(3){animation-delay:50ms}
+@keyframes shelf-page-enter{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes shelf-card-enter{from{opacity:.72;transform:translateY(7px) scale(.992)}to{opacity:1;transform:translateY(0) scale(1)}}
+.book-details{grid-column:1/-1;width:100%;min-width:0;padding-top:2px;box-sizing:border-box}
+.book-details summary{font-size:10px;color:#69737d;cursor:pointer;list-style:none;user-select:none}
+.book-details summary::-webkit-details-marker{display:none}
+.book-details summary:after{content:'⌄';margin-left:6px;color:#88939d}
+.book-details[open] summary:after{content:'⌃'}
+.book-details dl{display:grid;grid-template-columns:minmax(65px,.35fr) minmax(0,1fr);gap:4px 9px;margin:9px 0 2px;font-size:10px;line-height:1.45}
+.book-details dt{color:#818890}.book-details dd{margin:0;min-width:0;color:#343a40;overflow-wrap:anywhere;white-space:pre-wrap;max-height:160px;overflow:auto}
+.book-details dd:last-child:only-child{grid-column:1/-1}
+.recent-book-meta{min-width:0}
+@media(prefers-color-scheme:dark){.book-details summary,.book-details dt{color:#b3bac1}.book-details dd{color:#e7e9eb}}
+@media(prefers-reduced-motion:reduce){.page.visible,.reading-book,.all-book-card,.library-book,.discover-book{animation:none!important}}
 @media(prefers-color-scheme:dark){:root{--ink:#f5f5f7;--muted:#a1a1a6;--line:#38383a;--paper:#1c1c1e}body{background:#1c1c1e;color:#f5f5f7}.sidebar{background:rgba(38,38,40,.84);border-color:#38383a;color:#f5f5f7}.host,.secure,.stat,.service-card,.automation-card,.connect-card,.details-card,.table-card,.activity-card,.note,.update-card,.paste-error{background:rgba(44,44,46,.86);border-color:#3a3a3c;color:#f5f5f7}.host small,.secure small,nav a,.section-head p,header p{color:#b0b0b5}nav a.active,nav a:hover{background:#3a3a3c;color:#fff}.library-tools select,.view-switch{background:rgba(58,58,60,.82);border-color:#515154;color:#f5f5f7}.view-switch button.active{background:#636366;color:#fff}.all-books-grid.list-view .all-book-card{background:rgba(44,44,46,.82);border-color:#3a3a3c}.book-search{background:rgba(44,44,46,.9);border-color:#48484a;color:#f5f5f7}.all-book-meta span,.all-book-meta small{color:#b0b0b5}}
 .cover-fallback{background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(221,236,240,.86));border:1px solid rgba(255,255,255,.88);box-shadow:inset 0 1px 0 #ffffffb8,inset 0 -14px 32px #b7d4dc24;color:#526b73}
 .cover-fallback span{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:rgba(255,255,255,.64);border:1px solid #ffffffc9;box-shadow:0 6px 18px #617a8017;backdrop-filter:blur(14px)}

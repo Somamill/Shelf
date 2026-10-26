@@ -9,18 +9,47 @@ DERIVED_DATA="$BUILD_ROOT/DerivedData"
 APPLICATIONS_DIR="${SHELF_APPLICATIONS_DIR:-/Applications}"
 APP="$APPLICATIONS_DIR/Shelf.app"
 
-# A stable signing identity keeps macOS Keychain's app access decision valid
-# across rebuilds. Ad-hoc signatures are tied to each exact binary and can
-# trigger fresh Keychain confirmations after every build.
+# Prefer a stable Apple identity; otherwise create a persistent local Shelf
+# identity once. Ad-hoc signatures change on every build and re-trigger ACLs.
 SIGNING_IDENTITY="${SHELF_SIGNING_IDENTITY:-}"
 if [[ -z "$SIGNING_IDENTITY" ]] && command -v security >/dev/null 2>&1; then
   SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | sed -nE 's/.*"(Developer ID Application:.*|Apple Development:.*)"/\1/p' \
+    | sed -nE 's/.*"(Developer ID Application:.*|Apple Development:.*|Shelf Stable Code Signing)"/\1/p' \
     | head -n 1 || true)"
 fi
 if [[ -z "$SIGNING_IDENTITY" ]]; then
-  SIGNING_IDENTITY="-"
-  echo "Warning: no stable Apple signing identity is installed; macOS may ask again for Keychain access after a future app update." >&2
+  SIGNING_IDENTITY="Shelf Stable Code Signing"
+  KEYCHAIN="$(security default-keychain -d user 2>/dev/null | awk -F '"' 'NF > 1 {print $2; exit}' || true)"
+  [[ -n "$KEYCHAIN" ]] || KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+  if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq 'Shelf Stable Code Signing'; then
+    if ! command -v openssl >/dev/null 2>&1; then
+      echo "Install OpenSSL or set SHELF_SIGNING_IDENTITY to a stable Apple signing identity." >&2
+      exit 1
+    fi
+    SIGN_TMP="$(mktemp -d "${TMPDIR:-/tmp}/shelf-signing.XXXXXX")"
+    chmod 700 "$SIGN_TMP"
+    trap 'rm -rf "$SIGN_TMP"' EXIT
+    openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 \
+      -keyout "$SIGN_TMP/shelf.key" -out "$SIGN_TMP/shelf.crt" \
+      -subj "/CN=Shelf Stable Code Signing" \
+      -addext "basicConstraints=critical,CA:TRUE" \
+      -addext "keyUsage=critical,digitalSignature,keyCertSign,cRLSign" \
+      -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1
+    SIGN_PASSWORD="$(openssl rand -hex 32)"
+    export SIGN_PASSWORD
+    openssl pkcs12 -export -legacy -inkey "$SIGN_TMP/shelf.key" -in "$SIGN_TMP/shelf.crt" \
+      -out "$SIGN_TMP/shelf.p12" -passout "env:SIGN_PASSWORD" >/dev/null 2>&1
+    security import "$SIGN_TMP/shelf.p12" -k "$KEYCHAIN" -P "$SIGN_PASSWORD" \
+      -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+    security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$SIGN_TMP/shelf.crt"
+    unset SIGN_PASSWORD
+    rm -rf "$SIGN_TMP"
+    trap - EXIT
+    if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq 'Shelf Stable Code Signing'; then
+      echo "Could not register a stable Shelf signing identity in the login keychain." >&2
+      exit 1
+    fi
+  fi
 fi
 
 mkdir -p "$CONFIG_DIR" "$BUILD_ROOT"
@@ -91,8 +120,8 @@ else
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.1.14</string>
-<key>CFBundleVersion</key><string>15</string>
+<key>CFBundleShortVersionString</key><string>0.1.15</string>
+<key>CFBundleVersion</key><string>16</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

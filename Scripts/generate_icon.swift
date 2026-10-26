@@ -31,25 +31,30 @@ for (pixels, filename) in variants {
                  xRadius: size * 0.23, yRadius: size * 0.23).fill()
 
     let paper = NSColor(calibratedRed: 0.96, green: 0.945, blue: 0.90, alpha: 1)
-    // A broad open book with its outer page corners lifting up from the spine.
-    // The larger, unruled silhouette stays recognizable at Dock and menu sizes.
+    // A small, friendly open book. The outer page corners lift up from the spine.
     let left = NSBezierPath()
-    left.move(to: point(0.485, 0.76, size))
-    left.curve(to: point(0.045, 0.90, size), controlPoint1: point(0.35, 0.88, size), controlPoint2: point(0.17, 0.93, size))
-    left.line(to: point(0.045, 0.15, size))
-    left.curve(to: point(0.485, 0.25, size), controlPoint1: point(0.18, 0.21, size), controlPoint2: point(0.36, 0.22, size))
+    left.move(to: point(0.485, 0.64, size))
+    left.curve(to: point(0.17, 0.72, size), controlPoint1: point(0.36, 0.72, size), controlPoint2: point(0.23, 0.75, size))
+    left.curve(to: point(0.17, 0.32, size), controlPoint1: point(0.14, 0.60, size), controlPoint2: point(0.14, 0.42, size))
+    left.curve(to: point(0.485, 0.36, size), controlPoint1: point(0.26, 0.35, size), controlPoint2: point(0.39, 0.34, size))
     left.close()
     paper.setFill()
     left.fill()
 
     let right = NSBezierPath()
-    right.move(to: point(0.515, 0.76, size))
-    right.curve(to: point(0.955, 0.90, size), controlPoint1: point(0.65, 0.88, size), controlPoint2: point(0.83, 0.93, size))
-    right.line(to: point(0.955, 0.15, size))
-    right.curve(to: point(0.515, 0.25, size), controlPoint1: point(0.82, 0.21, size), controlPoint2: point(0.64, 0.22, size))
+    right.move(to: point(0.515, 0.64, size))
+    right.curve(to: point(0.83, 0.72, size), controlPoint1: point(0.64, 0.72, size), controlPoint2: point(0.77, 0.75, size))
+    right.curve(to: point(0.83, 0.32, size), controlPoint1: point(0.86, 0.60, size), controlPoint2: point(0.86, 0.42, size))
+    right.curve(to: point(0.515, 0.36, size), controlPoint1: point(0.74, 0.35, size), controlPoint2: point(0.61, 0.34, size))
     right.close()
     paper.setFill()
     right.fill()
+
+    // A subtle warm center seam makes the silhouette feel softer at small sizes.
+    NSColor(calibratedRed: 0.78, green: 0.72, blue: 0.58, alpha: 0.72).setStroke()
+    let seam=NSBezierPath()
+    seam.lineWidth=max(1,size*0.012)
+    seam.move(to:point(0.5,0.34,size));seam.curve(to:point(0.5,0.68,size),controlPoint1:point(0.49,0.48,size),controlPoint2:point(0.51,0.58,size));seam.stroke()
 
     NSGraphicsContext.restoreGraphicsState()
     guard let png = bitmap.representation(using: .png, properties: [:]) else {

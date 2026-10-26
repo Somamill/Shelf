@@ -1,3 +1,11 @@
+## 0.1.15
+
+- Keep Calibre covers visible in Finished and add a Recently added shelf.
+- Show complete Calibre metadata in compact, expandable book details.
+- Merge matching Hardcover records into the matching local book using title and author evidence.
+- Stabilize local app signing and give Shelf credentials a persistent app access list to prevent repeat Keychain prompts.
+- Add reduced-motion-friendly page and book transitions, refine the smaller book icon, and display activity times in the Mac’s local time zone.
+
 ## 0.1.14
 
 - Treat 97% reading progress as finished in Calibre and Shelf, remove those books from Continue reading, and show them in Finished.
