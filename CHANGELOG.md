@@ -1,3 +1,7 @@
+## 0.1.26
+
+- Link launchd stderr/stdout files to their main job logs so a later successful run clears old traceback entries from current errors.
+
 ## 0.1.25
 
 - Use the nearest preceding run timestamp for log entries without their own timestamp, preventing old multiline errors from appearing newly active.

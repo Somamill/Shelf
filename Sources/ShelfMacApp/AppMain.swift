@@ -1978,6 +1978,22 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     /// own process has completed successfully; raw log files remain available for audit.
     private func latestSuccessfulRun(in lines:[String],logPath:String)->Date? {
         let name=(logPath as NSString).lastPathComponent.lowercased()
+        // launchd captures stderr/stdout in sidecar files, while successful run
+        // markers are written to the main log. Reconcile those siblings so a stale
+        // traceback cannot outlive a later successful run of the same job.
+        if name.hasSuffix(".stderr.log") || name.hasSuffix(".stdout.log") {
+            let companion:String
+            if name.contains("icloud-importer") {
+                companion="\(logsPath)/calibre-icloud-import.log"
+            } else {
+                companion=logPath.replacingOccurrences(of:".stderr.log",with:".log")
+                    .replacingOccurrences(of:".stdout.log",with:".log")
+            }
+            if companion != logPath {
+                let companionLines=tail(companion,lines:240)
+                if let recovered=latestSuccessfulRun(in:companionLines,logPath:companion) { return recovered }
+            }
+        }
         for index in lines.indices.reversed() {
             let line=lines[index]
             let success:Bool
