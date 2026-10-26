@@ -1,3 +1,7 @@
+## 0.1.21
+
+- Keep reader Follow Shelf colors in sync while the reader window remains open.
+
 ## 0.1.20
 
 - Match Calibre's 120-second network timeout so slow progress updates do not fail at 20 seconds.
