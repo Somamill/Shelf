@@ -1,3 +1,9 @@
+## 0.1.18
+
+- Remove all runtime Keychain access from Shelf to prevent repeated Keychain dialogs.
+- Store passwords and API tokens in owner-only local credential files with restricted file permissions.
+- Keep scheduled jobs inside Operations so they no longer appear on the Books and other pages.
+
 ## 0.1.17
 
 - Add a visible System / OLED black appearance picker so OLED mode works even if WKWebView misses the macOS appearance signal.

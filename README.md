@@ -17,7 +17,7 @@ The project has no third-party Swift package dependencies. `project.yml` is the 
 
 The selected cloud folder is for EPUB intake and other user-managed files. Keep Calibre's active library and `metadata.db` on local storage. Calibre warns against running file sync while its library is open and says Google Drive is incompatible with a live Calibre library. Use the Calibre Content Server for access from other devices. [Calibre FAQ](https://manual.calibre-ebook.com/faq.html)
 
-The macOS app uses the system folder picker and persists its folder choices in a private per-user configuration. Passwords and sync keys entered in Setup are stored in macOS Keychain. No OAuth credentials for Google or Microsoft are requested.
+The macOS app uses the system folder picker and persists its folder choices in a private per-user configuration. Passwords and API keys are stored in owner-only local files under `~/Library/Application Support/Shelf` (directory mode 700, file mode 600); Shelf does not access macOS Keychain. Keep this folder out of cloud-sync folders and back it up only to a private encrypted destination. No OAuth credentials for Google or Microsoft are requested.
 
 ## Current and planned support
 

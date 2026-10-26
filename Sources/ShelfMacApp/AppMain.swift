@@ -3,8 +3,6 @@ import CryptoKit
 import ImageIO
 import Foundation
 import UniformTypeIdentifiers
-import Security
-import LocalAuthentication
 import WebKit
 import ShelfCore
 
@@ -130,9 +128,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerFontSize:Double=19
     private var readerFontChoice="sans"
     private var readerIsJapanese=false
-    private let keychainCacheLock=NSLock()
-    private var keychainCredentialCache=[String:String]()
-    private var keychainCredentialLookups=Set<String>()
+    private let credentialStoreLock=NSLock()
     private var loadingLabel: NSTextField!
     private var updates: [String: Any] = ["calibreInstalled":"9.16", "calibreLatest":"Not checked", "crossPointInstalled":"1.6.0", "crossPointLatest":"Not checked", "checkedAt":NSNull()]
     private let uid = String(getuid())
@@ -165,102 +161,52 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return found.isEmpty ? fallback : found
     }
 
-    private func keychainCredential(_ key: String) -> String? {
-        keychainCacheLock.lock()
-        defer { keychainCacheLock.unlock() }
-        if keychainCredentialLookups.contains(key) { return keychainCredentialCache[key] }
-        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key,
-                                       kSecAttrSynchronizable as String: false]
-        var query=identity
-        query[kSecUseDataProtectionKeychain as String]=true
-        query[kSecReturnData as String]=true
-        query[kSecMatchLimit as String]=kSecMatchLimitOne
-        // Never let background refreshes surface repeated Keychain or iCloud
-        // Keychain dialogs. New Shelf credentials are stored locally in the
-        // Data Protection Keychain; legacy entries are read without UI.
-        let authenticationContext=LAContext()
-        authenticationContext.interactionNotAllowed = true
-        query[kSecUseAuthenticationContext as String]=authenticationContext
-        var result: CFTypeRef?
-        var status=SecItemCopyMatching(query as CFDictionary,&result)
-        var legacy=false
-        if status == errSecItemNotFound {
-            // Migrate only non-synchronizable legacy items. This excludes
-            // iCloud Keychain records, which caused a prompt per credential.
-            var oldQuery=identity
-            oldQuery[kSecUseDataProtectionKeychain as String]=false
-            oldQuery[kSecReturnData as String]=true
-            oldQuery[kSecMatchLimit as String]=kSecMatchLimitOne
-            oldQuery[kSecUseAuthenticationContext as String]=authenticationContext
-            result=nil
-            status=SecItemCopyMatching(oldQuery as CFDictionary,&result)
-            legacy=status == errSecSuccess
-        }
-        guard status == errSecSuccess,let data=result as? Data,let value=String(data:data,encoding:.utf8) else {
-            if status == errSecItemNotFound { keychainCredentialLookups.insert(key) }
-            return nil
-        }
-        keychainCredentialLookups.insert(key)
-        keychainCredentialCache[key]=value
-        if legacy {
-            var add=identity
-            add[kSecUseDataProtectionKeychain as String]=true
-            add[kSecValueData as String]=data
-            add[kSecAttrAccessible as String]=kSecAttrAccessibleAfterFirstUnlock
-            _=SecItemAdd(add as CFDictionary,nil)
-        }
-        return value
+    private var credentialStorePath:String { "\(home)/Library/Application Support/Shelf/credentials.json" }
+
+    private func storedCredentials()->[String:String] {
+        guard let data=try? Data(contentsOf:URL(fileURLWithPath:credentialStorePath)),
+              let values=try? JSONSerialization.jsonObject(with:data) as? [String:String] else { return [:] }
+        return values
     }
 
-    @discardableResult
-    private func saveKeychainCredential(_ key: String, value: String) -> Bool {
-        keychainCacheLock.lock()
-        defer { keychainCacheLock.unlock() }
-        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key,
-                                       kSecUseDataProtectionKeychain as String: true,
-                                       kSecAttrSynchronizable as String: false]
-        let data = Data(value.utf8)
-        let update = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if update == errSecSuccess {
-            keychainCredentialCache[key]=value
-            keychainCredentialLookups.insert(key)
+    private func localCredential(_ key:String)->String? {
+        credentialStoreLock.lock(); defer { credentialStoreLock.unlock() }
+        let fileValue=storedCredentials()[key]?.trimmingCharacters(in:.whitespacesAndNewlines)
+        if let fileValue,!fileValue.isEmpty { return fileValue }
+        if key == "calibre-server-password" {
+            let legacy=(try? String(contentsOfFile:"\(statePath)/calibre-server-password",encoding:.utf8))?.trimmingCharacters(in:.whitespacesAndNewlines)
+            return legacy?.isEmpty == false ? legacy : nil
+        }
+        return nil
+    }
+
+    private func writePrivateFile(_ data:Data,to path:String)->Bool {
+        let url=URL(fileURLWithPath:path),directory=url.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:directory.path)
+            try data.write(to:url,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
             return true
-        }
-        var add = identity
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let saved=SecItemAdd(add as CFDictionary, nil) == errSecSuccess
-        if saved {
-            keychainCredentialCache[key]=value
-            keychainCredentialLookups.insert(key)
-        }
-        return saved
+        } catch { return false }
     }
 
     @discardableResult
-    private func deleteKeychainCredential(_ key: String) -> Bool {
-        keychainCacheLock.lock()
-        defer { keychainCacheLock.unlock() }
-        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key,
-                                       kSecAttrSynchronizable as String: false]
-        var protected=identity
-        protected[kSecUseDataProtectionKeychain as String]=true
-        var legacy=identity
-        legacy[kSecUseDataProtectionKeychain as String]=false
-        let status = SecItemDelete(protected as CFDictionary)
-        let legacyStatus=SecItemDelete(legacy as CFDictionary)
-        let deleted=(status == errSecSuccess || status == errSecItemNotFound) && (legacyStatus == errSecSuccess || legacyStatus == errSecItemNotFound)
-        if deleted {
-            keychainCredentialCache.removeValue(forKey:key)
-            keychainCredentialLookups.insert(key)
-        }
-        return deleted
+    private func saveLocalCredential(_ key:String,value:String)->Bool {
+        credentialStoreLock.lock(); defer { credentialStoreLock.unlock() }
+        var values=storedCredentials(); values[key]=value
+        guard JSONSerialization.isValidJSONObject(values),
+              let data=try? JSONSerialization.data(withJSONObject:values,options:[.sortedKeys]) else { return false }
+        return writePrivateFile(data,to:credentialStorePath)
+    }
+
+    @discardableResult
+    private func deleteLocalCredential(_ key:String)->Bool {
+        credentialStoreLock.lock(); defer { credentialStoreLock.unlock() }
+        var values=storedCredentials(); values.removeValue(forKey:key)
+        guard JSONSerialization.isValidJSONObject(values),
+              let data=try? JSONSerialization.data(withJSONObject:values,options:[.sortedKeys]) else { return false }
+        return writePrivateFile(data,to:credentialStorePath)
     }
 
     static func main() {
@@ -441,11 +387,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             try configuration.set("services.kosyncHealth",sync.isEmpty ? "" : "\(sync)/healthcheck")
             try configuration.set("services.crosspointApi",crosspoint)
             try configuration.set("services.crosspointHealth",crosspoint.isEmpty ? "" : "\(crosspoint)/healthz")
-            if let password=form["calibrePassword"] as? String,!password.isEmpty,!saveKeychainCredential("calibre-server-password",value:password) {
-                throw NSError(domain:"ShelfSetup",code:1,userInfo:[NSLocalizedDescriptionKey:"Could not save the Calibre password to Keychain."])
+            if let password=form["calibrePassword"] as? String,!password.isEmpty,
+               (!saveLocalCredential("calibre-server-password",value:password) || !writePrivateFile(Data((password+"\n").utf8),to:"\(statePath)/calibre-server-password")) {
+                throw NSError(domain:"ShelfSetup",code:1,userInfo:[NSLocalizedDescriptionKey:"Could not save the Calibre password to Shelf’s private local credential file."])
             }
-            if let key=form["syncApiKey"] as? String,!key.isEmpty,!saveKeychainCredential("sync-api-key",value:key) {
-                throw NSError(domain:"ShelfSetup",code:2,userInfo:[NSLocalizedDescriptionKey:"Could not save the sync API key to Keychain."])
+            if let key=form["syncApiKey"] as? String,!key.isEmpty,!saveLocalCredential("sync-api-key",value:key) {
+                throw NSError(domain:"ShelfSetup",code:2,userInfo:[NSLocalizedDescriptionKey:"Could not save the sync API key to Shelf’s private local credential file."])
             }
             try configuration.set("setupCompleted",true)
             send("setupSaved",["ok":true])
@@ -599,13 +546,13 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func syncAuthKey() -> String {
-        if let saved=keychainCredential("sync-api-key"),!saved.isEmpty { return saved }
+        if let saved=localCredential("sync-api-key"),!saved.isEmpty { return saved }
         return Self.run(dockerPath,["exec","kosync","redis-cli","--raw","-n","1","GET","user:\(username):key"]).output.trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
     private func serverPassword() -> String {
         let file=(try? String(contentsOfFile:"\(statePath)/calibre-server-password",encoding:.utf8))?.trimmingCharacters(in:.newlines) ?? ""
-        return file.isEmpty ? (keychainCredential("calibre-server-password") ?? "") : file
+        return file.isEmpty ? (localCredential("calibre-server-password") ?? "") : file
     }
 
     private func fetchReaderProgress(_ documents:[String]) -> Double? {
@@ -930,7 +877,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func publishReadwiseHighlight(title:String,author:String,text:String,completion:@escaping(Bool)->Void) {
-        guard let token=keychainCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
+        guard let token=localCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
         let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
@@ -958,19 +905,19 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 guard result.code == 0, response["ok"] as? Bool == true else {
                     self.notify(response["error"] as? String ?? "Readwise could not validate this token."); return
                 }
-                guard self.saveKeychainCredential("readwise-reader-token",value:token) else {
-                    self.notify("Could not save the validated token to macOS Keychain."); return
+                guard self.saveLocalCredential("readwise-reader-token",value:token) else {
+                    self.notify("Could not save the validated token to Shelf’s private local credential file."); return
                 }
                 self.send("readwiseTokenSaved",["connected":true])
-                self.notify("Readwise access token verified and saved to macOS Keychain.")
+                self.notify("Readwise access token verified and saved locally on this Mac.")
                 self.refresh()
             }
         }
     }
 
     private func disconnectReadwiseReader() {
-        guard deleteKeychainCredential("readwise-reader-token") else {
-            notify("Could not remove the Readwise connection from macOS Keychain."); return
+        guard deleteLocalCredential("readwise-reader-token") else {
+            notify("Could not remove the local Readwise connection."); return
         }
         notify("Readwise Reader disconnected. Saved local highlights remain in Shelf.")
         refresh()
@@ -978,11 +925,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func syncReadwiseReader() {
         let token:String
-        if let saved=keychainCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
+        if let saved=localCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
         else {
             let alert=NSAlert()
             alert.messageText="Connect Readwise Reader"
-            alert.informativeText="Paste your Readwise access token. Shelf stores it in macOS Keychain and uses it to sync Reader progress and highlights with matching local EPUBs."
+            alert.informativeText="Paste your Readwise access token. Shelf stores it in a private local file on this Mac and uses it to sync Reader progress and highlights with matching local EPUBs."
             let field=NSSecureTextField(frame:NSRect(x:0,y:0,width:310,height:24))
             field.placeholderString="Readwise access token"
             alert.accessoryView=field
@@ -990,8 +937,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             alert.addButton(withTitle:"Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             token=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-            guard !token.isEmpty,saveKeychainCredential("readwise-reader-token",value:token) else {
-                notify("Could not save the Readwise token to macOS Keychain."); return
+                guard !token.isEmpty,saveLocalCredential("readwise-reader-token",value:token) else {
+                notify("Could not save the Readwise token to Shelf’s private local credential file."); return
             }
         }
         guard let syncKey=Optional(syncAuthKey()),!syncKey.isEmpty else { notify("KOReader Sync credentials are unavailable."); return }
@@ -1391,7 +1338,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let shared=(md5(pass) == (plugin["progress_sync_password"] as? String ?? "") && md5(pass) == redis)
         let readerOPDS=service("readerOpds",fallback:"http://\(ip):8080/opds")
         let readerSync=service("readerSync",fallback:"http://\(ip):17200")
-        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"syncActivity":readSyncActivity(),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(keychainCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
+        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"syncActivity":readSyncActivity(),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(localCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
     }
 
     private func confirmAndRun(_ id:String) {
