@@ -1,3 +1,7 @@
+## 0.1.24
+
+- Clear a stale launch-agent failure status when the bridge log proves a later successful run, so an old timeout cannot keep the bridge marked as an error.
+
 ## 0.1.23
 
 - Automatically hide old log errors after the same job records a successful recovery, and age out issues after seven days in diagnostic exports.

@@ -1251,7 +1251,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let pid=agent?.pid
             let since=pid.map(processUptime)
             let mod=logPath.flatMap(fileModified)
-            let lastLine=logPath.flatMap { tail($0,lines:1).last } ?? ""
+            let runLines=logPath.map { tail($0,lines:240) } ?? []
+            let lastLine=runLines.last ?? ""
+            let recoveredAt=logPath.flatMap { latestSuccessfulRun(in:runLines,logPath:$0) }
+            let latestFailure=runLines.reversed().first { line in
+                guard eventLevel(line) == "Error" else { return false }
+                guard let date=eventDate(line) else { return true }
+                if Date().timeIntervalSince(date) > 7*86400 { return false }
+                return recoveredAt.map { $0 <= date } ?? true
+            }
+            let effectiveLastExit=(recoveredAt != nil && latestFailure == nil) ? 0 : (agent?.lastExit ?? 0)
             var state="scheduled", summary="Scheduled task waiting for its next interval", code: String?
             var measuredUptime=since ?? "Not running"
             if category == "Service" {
@@ -1271,9 +1280,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             } else {
                 let maxAge=(interval ?? 3600)*2.2+180
                 let age=mod.map { Date().timeIntervalSince($0) }
-                let errorLine = !reportsNoIssues(lastLine) && lastLine.range(of:#"error|failed|failure|denied|exception"#,options:.regularExpression.union(.caseInsensitive)) != nil
+                let errorLine = latestFailure != nil
                 if let age, age < maxAge {
-                    state=(errorLine || (agent?.lastExit ?? 0) != 0) ? "warning" : "healthy"
+                    state=(errorLine || effectiveLastExit != 0) ? "warning" : "healthy"
                 }
                 else if agent?.pid == nil && agent?.lastExit == nil {
                     state="scheduled"
@@ -1304,7 +1313,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 "icon":icon,"endpoint":endpoint ?? "","uptime":measuredUptime,
                 "lastActivity":mod.map(relative) ?? "No log yet",
                 "interval":interval.map(formatInterval) ?? "Continuous",
-                "lastExit":agent?.lastExit.map(String.init) ?? "—","logPath":logPath ?? "","action":action ?? ""
+                "lastExit":agent?.lastExit == nil ? "—" : String(effectiveLastExit),"logPath":logPath ?? "","action":action ?? ""
             ]
             items.append(row)
         }
