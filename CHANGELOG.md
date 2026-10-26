@@ -1,3 +1,11 @@
+## 0.1.20
+
+- Match Calibre's 120-second network timeout so slow progress updates do not fail at 20 seconds.
+- Read existing sync metadata and write only fields that changed, reducing bridge time and repeated log noise.
+- Make recently added book cards follow the dashboard's OLED and System palettes.
+- Make the reader follow Shelf appearance by default, including true black in OLED mode, while retaining reader color choices.
+- Sort the reader chapter menu by actual book document order instead of EPUB navigation-list order.
+
 ## 0.1.19
 
 - Unify light appearance so navigation, cards, controls and book views share one balanced palette.

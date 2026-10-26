@@ -29,6 +29,7 @@ CALIBREDB = TOOLS.get("calibredb") or shutil.which("calibredb") or "/Application
 DOCKER = TOOLS.get("docker") or shutil.which("docker") or "/usr/bin/docker"
 SERVER = configured_value("services", "calibreCli", "http://127.0.0.1:8080/#Calibre_Library")
 CONTAINER = CONTAINERS.get("kosync", "kosync")
+COMMAND_TIMEOUT = 150  # calibredb's default network timeout is 120 seconds.
 PASSFILE = os.path.join(STATE, "calibre-server-password")
 LOGFILE = os.path.join(LOGS, "kosync-calibre-bridge.log")
 LOCK = os.path.join(STATE, ".kosync-calibre-bridge.lock")
@@ -49,7 +50,7 @@ def cmd(args, check=True):
         stderr=subprocess.PIPE,
         text=True,
         check=check,
-        timeout=20,
+        timeout=COMMAND_TIMEOUT,
     )
 
 def redis(*args):
@@ -296,6 +297,39 @@ def set_custom(column, book_id, value):
         return False
     return True
 
+def custom_value_matches(existing, desired, column):
+    if existing is None or str(existing).strip().casefold() in {"", "none"}:
+        return False
+    label = column.lstrip("#*")
+    if label in {"ko_progfloat"}:
+        try:
+            return abs(float(existing) - float(desired)) < 0.0000005
+        except (TypeError, ValueError):
+            return False
+    if label == "ko_statusbool":
+        old_bool = str(existing).strip().casefold() in {"1", "true", "yes"}
+        new_bool = str(desired).strip().casefold() in {"1", "true", "yes"}
+        return old_bool == new_bool
+    if label in {"ko_lastsync", "ko_lastmod"}:
+        current = str(existing).strip()
+        try:
+            parsed = datetime.fromisoformat(current.replace("Z", "+00:00"))
+            current_date = parsed.astimezone().date().isoformat() if parsed.tzinfo else parsed.date().isoformat()
+        except ValueError:
+            current_date = current[:10]
+        return current_date == str(desired).strip()[:10]
+    return str(existing).strip().casefold() == str(desired).strip().casefold()
+
+def set_custom_if_changed(column, book_id, value, book):
+    """Avoid slow remote writes for Calibre fields that already match KOReader."""
+    field = "*" + column.lstrip("#*")
+    if custom_value_matches(book.get(field), value, column):
+        return True, False
+    if not set_custom(column, book_id, value):
+        return False, False
+    book[field] = value
+    return True, True
+
 def write_json_atomic(path, payload):
     fd, temp_path = tempfile.mkstemp(prefix=".kosync-calibre-", dir=STATE)
     try:
@@ -325,9 +359,10 @@ def main():
             "--with-library", SERVER,
             "--username", USERNAME,
             "--password", f"<f:{PASSFILE}>",
+            "--timeout=120",
             "list",
             "--for-machine",
-            "--fields", "id,title,formats,*ko_md5",
+            "--fields", "id,title,formats,*ko_md5,*ko_progfloat,*ko_progint,*ko_status,*ko_statusbool,*ko_loc,*ko_device_name,*ko_device_id,*ko_lastsync,*ko_lastmod",
         ], check=False)
 
         if book_result.returncode != 0:
@@ -368,6 +403,7 @@ def main():
         identities = local_book_identities()
         remote_metadata = crosspoint_document_metadata()
         book_ids = {int(book.get("id")) for book in books if book.get("id") is not None}
+        book_values = {int(book["id"]): book for book in books if book.get("id") is not None}
 
         try:
             with open(ALIASES, "r", encoding="utf-8") as aliases_file:
@@ -441,7 +477,7 @@ def main():
 
             canonical = candidate_digests[0]
             if existing.lower() != canonical.lower():
-                if set_custom("#ko_md5", book_id, canonical):
+                if set_custom_if_changed("#ko_md5", book_id, canonical, book_values[book_id])[0]:
                     md5_count += 1
 
             for digest in candidate_digests:
@@ -588,6 +624,8 @@ def main():
                     sort_timestamp, digest, percentage, progress, device, device_id, pct
                 )
 
+        changed_books = 0
+        unchanged_books = 0
         for book_id, (sort_timestamp, digest, percentage, progress, device, device_id, pct) in latest_by_book.items():
 
             pct100 = max(0, min(100, round(pct * 100)))
@@ -598,22 +636,31 @@ def main():
             finished = "true" if pct >= 0.97 else "false"
 
             update_ok = True
+            fields_changed = 0
             for column, value in [
                 ("#ko_progfloat", percentage),
                 ("#ko_progint", str(pct100)),
                 ("#ko_status", status),
                 ("#ko_statusbool", finished),
             ]:
-                update_ok = set_custom(column, book_id, value) and update_ok
+                success, changed = set_custom_if_changed(column, book_id, value, book_values[book_id])
+                update_ok = success and update_ok
+                fields_changed += int(changed)
 
             if progress:
-                update_ok = set_custom("#ko_loc", book_id, progress) and update_ok
+                success, changed = set_custom_if_changed("#ko_loc", book_id, progress, book_values[book_id])
+                update_ok = success and update_ok
+                fields_changed += int(changed)
 
             if device:
-                update_ok = set_custom("#ko_device_name", book_id, device) and update_ok
+                success, changed = set_custom_if_changed("#ko_device_name", book_id, device, book_values[book_id])
+                update_ok = success and update_ok
+                fields_changed += int(changed)
 
             if device_id:
-                update_ok = set_custom("#ko_device_id", book_id, device_id) and update_ok
+                success, changed = set_custom_if_changed("#ko_device_id", book_id, device_id, book_values[book_id])
+                update_ok = success and update_ok
+                fields_changed += int(changed)
 
             if sort_timestamp:
                 try:
@@ -624,14 +671,19 @@ def main():
             else:
                 datestr = datetime.now().strftime("%Y-%m-%d")
 
-            update_ok = set_custom("#ko_lastsync", book_id, datestr) and update_ok
-            update_ok = set_custom("#ko_lastmod", book_id, datestr) and update_ok
+            success, changed = set_custom_if_changed("#ko_lastsync", book_id, datestr, book_values[book_id])
+            update_ok = success and update_ok
+            fields_changed += int(changed)
+            success, changed = set_custom_if_changed("#ko_lastmod", book_id, datestr, book_values[book_id])
+            update_ok = success and update_ok
+            fields_changed += int(changed)
 
             if update_ok:
-                log(
-                    f"SYNCED book={book_id} md5={digest} "
-                    f"percentage={percentage} device={device}"
-                )
+                if fields_changed:
+                    changed_books += 1
+                    log(f"SYNCED book={book_id} fields_updated={fields_changed} percentage={percentage} device={device}")
+                else:
+                    unchanged_books += 1
             else:
                 log(f"ERROR partial progress sync book={book_id} md5={digest}")
 
@@ -663,7 +715,8 @@ def main():
         log(
             f"BRIDGE END books={len(books)} "
             f"md5_created={md5_count} "
-            f"documents={found} matched={len(latest_by_book)}"
+            f"documents={found} matched={len(latest_by_book)} "
+            f"updated={changed_books} unchanged={unchanged_books}"
         )
 
     except Exception as e:

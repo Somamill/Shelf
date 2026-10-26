@@ -17,7 +17,7 @@ const post=o=>window.webkit.messageHandlers.dashboard.postMessage(o);
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 let appearancePreference=preferenceGet('shelfAppearance')==='system'?'system':'oled';
 const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
-function applyAppearance(){const dark=appearancePreference==='oled'||systemAppearance.matches;document.documentElement.dataset.appearance=appearancePreference;document.documentElement.dataset.theme=dark?'dark':'light';const picker=document.getElementById('appearanceChoice');if(picker)picker.value=appearancePreference}
+function applyAppearance(){const dark=appearancePreference==='oled'||systemAppearance.matches;document.documentElement.dataset.appearance=appearancePreference;document.documentElement.dataset.theme=dark?'dark':'light';const picker=document.getElementById('appearanceChoice');if(picker)picker.value=appearancePreference;post({type:'appearance',mode:appearancePreference,resolved:dark?'dark':'light'})}
 function setAppearance(value){appearancePreference=value==='system'?'system':'oled';preferenceSet('shelfAppearance',appearancePreference);applyAppearance()}
 applyAppearance();
 if(systemAppearance.addEventListener)systemAppearance.addEventListener('change',()=>{if(appearancePreference==='system')applyAppearance()});else if(systemAppearance.addListener)systemAppearance.addListener(()=>{if(appearancePreference==='system')applyAppearance()});

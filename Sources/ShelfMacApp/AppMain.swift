@@ -317,6 +317,15 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "loadSetup": loadSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
         case "chooseSetupFolder": chooseSetupFolder(body["role"] as? String ?? "library")
+        case "appearance":
+            let mode=(body["mode"] as? String) == "system" ? "system" : "oled"
+            let resolved=(body["resolved"] as? String) == "light" ? "light" : "dark"
+            UserDefaults.standard.set(mode,forKey:"shelfAppearance")
+            UserDefaults.standard.set(resolved,forKey:"shelfResolvedAppearance")
+            if (UserDefaults.standard.string(forKey:"readerTheme") ?? "auto") == "auto" {
+                if var reader=activeReader { reader["appearance"]=resolved; activeReader=reader }
+                applyReaderPreferences()
+            }
         case "refresh": refresh()
         case "checkUpdates": checkUpdates()
         case "checkAll": checkAll()
@@ -598,6 +607,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             "authors":payload["authors"] ?? "",
             "filename":payload["filename"] ?? "",
             "language":payload["language"] ?? "",
+            "appearance":UserDefaults.standard.string(forKey:"shelfResolvedAppearance") ?? "dark",
             "resumePercentage":payload["resumePercentage"] ?? 0
         ]
         let language=(payload["language"] as? String ?? "").lowercased()
@@ -610,8 +620,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let savedFont=UserDefaults.standard.string(forKey:fontKey) ?? (japanese ? "serif" : "sans")
         let font=["serif","sans","system"].contains(savedFont) ? savedFont : (japanese ? "serif" : "sans")
         readerFontChoice=font
-        let savedTheme=UserDefaults.standard.string(forKey:"readerTheme") ?? "paper"
-        let theme=["light","paper","night"].contains(savedTheme) ? savedTheme : "paper"
+        let savedTheme=UserDefaults.standard.string(forKey:"readerTheme") ?? "auto"
+        let theme=["auto","light","paper","night"].contains(savedTheme) ? savedTheme : "auto"
         let savedSpacing=UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal"
         let spacing=["compact","normal","relaxed"].contains(savedSpacing) ? savedSpacing : "normal"
         if let json=try? JSONSerialization.data(withJSONObject:readerData,options:[.fragmentsAllowed,.sortedKeys]),
@@ -622,7 +632,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               const style=document.createElement('style');
               style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:88px 280px 104px;column-width:790px!important;column-gap:560px!important;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
               let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,userHasNavigated=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
-              window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd']};const palette=themes[p.theme]||themes.paper;const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
+              window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd'],oled:['#000000','#f1f1f3']};const palette=p.theme==='auto'?(window.readerBook.appearance==='dark'?themes.oled:themes.paper):(themes[p.theme]||themes.paper);const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.colorScheme=window.readerBook.appearance==='dark'?'dark':'light';root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
               let titleKey=(window.readerBook.title||'').trim().toLocaleLowerCase();
               const chapterEntries=[],seenChapterTargets=new Set();
               const tocLinks=Array.from(document.querySelectorAll('.p-toc a, #toc a, [role="doc-toc"] a')).concat(Array.from(document.querySelectorAll('nav')).filter(n=>/(^|\\s)toc(\\s|$)/i.test(n.getAttribute('epub:type')||n.getAttributeNS('http://www.idpf.org/2007/ops','type')||'')).flatMap(n=>Array.from(n.querySelectorAll('a'))));
@@ -635,6 +645,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               if(!chapterEntries.length){for(const target of Array.from(document.querySelectorAll('[id][title].main'))){const label=(target.getAttribute('title')||'').trim();if(label&&!seenChapterTargets.has(target)){seenChapterTargets.add(target);chapterEntries.push({element:target,title:label.replace(/\\s+/g,' ').slice(0,100)})}}}
               if(!chapterEntries.length){for(const h of Array.from(document.querySelectorAll('h1,h2,h3,h4'))){const t=(h.innerText||h.textContent||'').trim();if(t&&t.toLocaleLowerCase()!==titleKey&&!/^(contents|table of contents|copyright|title page)$/i.test(t)){chapterEntries.push({element:h,title:t.replace(/\\s+/g,' ').slice(0,100)})}}}
               if(!chapterEntries.length)chapterEntries.push({element:document.body,title:window.readerBook.title||'Book'});
+              // EPUB navigation documents can list entries out of reading order.
+              // The converted book's DOM follows its EPUB spine and is the reliable
+              // source for the chapter menu and previous/next chapter controls.
+              chapterEntries.sort((a,b)=>{const relation=a.element.compareDocumentPosition(b.element);if(relation&Node.DOCUMENT_POSITION_FOLLOWING)return -1;if(relation&Node.DOCUMENT_POSITION_PRECEDING)return 1;return 0});
               const headings=chapterEntries.map(entry=>entry.element);headings.forEach((h,i)=>{if(!h.id)h.id='reader-section-'+i});
               window.readerChapters=chapterEntries.map((entry,i)=>({title:entry.title||('Section '+(i+1)),id:entry.element.id}));
               function step(){return readerViewport?readerViewport.clientWidth:window.innerWidth}
@@ -726,7 +740,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func showReaderAppearance(_ sender:NSButton) {
         if let shown=readerSettingsPopover,shown.isShown { shown.performClose(sender); return }
         let font=NSPopUpButton(frame:.zero,pullsDown:false); font.addItems(withTitles:["Noto Sans","Noto Serif","System"]); font.target=self; font.action=#selector(readerSelectFont(_:)); font.selectItem(at:["sans","serif","system"].firstIndex(of:readerFontChoice) ?? 0); font.widthAnchor.constraint(equalToConstant:156).isActive=true; font.controlSize = .small; readerFontMenu=font
-        let theme=NSPopUpButton(frame:.zero,pullsDown:false); theme.addItems(withTitles:["Light","Paper","Night"]); theme.target=self; theme.action=#selector(readerSelectTheme(_:)); theme.selectItem(at:["light","paper","night"].firstIndex(of:UserDefaults.standard.string(forKey:"readerTheme") ?? "paper") ?? 1); theme.widthAnchor.constraint(equalToConstant:156).isActive=true; theme.controlSize = .small; readerThemeMenu=theme
+        let theme=NSPopUpButton(frame:.zero,pullsDown:false); theme.addItems(withTitles:["Follow Shelf","Light","Paper","Night"]); theme.target=self; theme.action=#selector(readerSelectTheme(_:)); theme.selectItem(at:["auto","light","paper","night"].firstIndex(of:UserDefaults.standard.string(forKey:"readerTheme") ?? "auto") ?? 0); theme.widthAnchor.constraint(equalToConstant:156).isActive=true; theme.controlSize = .small; readerThemeMenu=theme
         let spacing=NSPopUpButton(frame:.zero,pullsDown:false); spacing.addItems(withTitles:["Compact","Normal","Relaxed"]); spacing.target=self; spacing.action=#selector(readerSelectSpacing(_:)); spacing.selectItem(at:["compact","normal","relaxed"].firstIndex(of:UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal") ?? 1); spacing.widthAnchor.constraint(equalToConstant:156).isActive=true; spacing.controlSize = .small; readerSpacingMenu=spacing
         let size=NSTextField(labelWithString:"\(Int(readerFontSize)) pt"); size.alignment = .center; size.widthAnchor.constraint(equalToConstant:46).isActive=true; readerSizeLabel=size
         let minus=NSButton(title:"−",target:self,action:#selector(readerDecreaseText)); minus.bezelStyle = .rounded; minus.controlSize = .small
@@ -748,7 +762,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func readerPreferencePayload()->[String:Any] {
-        ["size":readerFontSize,"font":readerFontChoice,"theme":UserDefaults.standard.string(forKey:"readerTheme") ?? "paper","spacing":UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal"]
+        ["size":readerFontSize,"font":readerFontChoice,"theme":UserDefaults.standard.string(forKey:"readerTheme") ?? "auto","spacing":UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal"]
     }
 
     private func applyReaderPreferences() {
@@ -794,7 +808,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func readerDecreaseText() { readerFontSize=max(12,readerFontSize-1); UserDefaults.standard.set(readerFontSize,forKey:"readerFontSize"); applyReaderPreferences() }
     @objc private func readerIncreaseText() { readerFontSize=min(32,readerFontSize+1); UserDefaults.standard.set(readerFontSize,forKey:"readerFontSize"); applyReaderPreferences() }
     @objc private func readerSelectFont(_ sender:NSPopUpButton) { let values=["sans","serif","system"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; readerFontChoice=values[index]; UserDefaults.standard.set(readerFontChoice,forKey:readerIsJapanese ? "readerFontFamily.ja" : "readerFontFamily.en"); applyReaderPreferences() }
-    @objc private func readerSelectTheme(_ sender:NSPopUpButton) { let values=["light","paper","night"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; UserDefaults.standard.set(values[index],forKey:"readerTheme"); applyReaderPreferences() }
+    @objc private func readerSelectTheme(_ sender:NSPopUpButton) { let values=["auto","light","paper","night"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; UserDefaults.standard.set(values[index],forKey:"readerTheme"); applyReaderPreferences() }
     @objc private func readerSelectSpacing(_ sender:NSPopUpButton) { let values=["compact","normal","relaxed"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; UserDefaults.standard.set(values[index],forKey:"readerSpacing"); applyReaderPreferences() }
     @objc private func readerProgressChanged(_ sender:NSSlider) { readerWebView?.evaluateJavaScript("window.readerScrollTo(\(sender.doubleValue));",completionHandler:nil) }
     @objc private func closeReader() {
