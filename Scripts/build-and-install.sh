@@ -91,8 +91,8 @@ else
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.1.13</string>
-<key>CFBundleVersion</key><string>14</string>
+<key>CFBundleShortVersionString</key><string>0.1.14</string>
+<key>CFBundleVersion</key><string>15</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
@@ -110,5 +110,8 @@ if [[ -e "$APP" ]]; then
 fi
 ditto "$BUILT_APP" "$APP"
 codesign --verify --deep --strict "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
+touch "$APP"
+killall Dock >/dev/null 2>&1 || true
 open -a "$APP"
 echo "Installed $APP"
