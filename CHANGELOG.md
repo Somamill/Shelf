@@ -1,3 +1,7 @@
+## 0.1.22
+
+- Stop reporting historical 20-second Calibre bridge timeouts after the timeout fix is installed.
+
 ## 0.1.21
 
 - Keep reader Follow Shelf colors in sync while the reader window remains open.

@@ -1951,7 +1951,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func isResolvedBeforeThisBuild(_ line:String,_ date:Date,installedAt:Date)->Bool {
-        line.localizedCaseInsensitiveContains("ambiguous column name: book") && date < installedAt
+        if line.localizedCaseInsensitiveContains("ambiguous column name: book") && date < installedAt { return true }
+        let isOldCalibreTimeout=line.localizedCaseInsensitiveContains("TimeoutExpired")
+            && line.localizedCaseInsensitiveContains("calibredb")
+            && line.localizedCaseInsensitiveContains("timed out after 20 seconds")
+        return isOldCalibreTimeout && date < installedAt
     }
 
     private func compactDiagnosticLine(_ source:String)->String {
