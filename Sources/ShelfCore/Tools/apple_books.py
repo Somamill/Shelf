@@ -5,7 +5,6 @@ Apple does not expose this data through a public macOS API. This importer is
 intentionally read-only and treats the on-disk Books database as optional and
 schema-versioned. It never changes or unlocks the Books database.
 """
-import glob
 import json
 import os
 import sqlite3
@@ -23,11 +22,21 @@ def candidate_databases():
         home / "Library/Group Containers/group.com.apple.BKAgentService",
     ]
     found = set()
+    denied = False
     for root in roots:
-        if root.exists():
-            for pattern in ("**/BKLibrary*.sqlite", "**/BKLibrary*.sqlite3"):
-                found.update(Path(p) for p in glob.glob(str(root / pattern), recursive=True))
-    return sorted(p for p in found if p.is_file())
+        def onerror(error):
+            nonlocal denied
+            if isinstance(error, PermissionError) or getattr(error, "errno", None) == 1:
+                denied = True
+
+        try:
+            for folder, _directories, filenames in os.walk(root, onerror=onerror):
+                for filename in filenames:
+                    if filename.startswith("BKLibrary") and filename.endswith((".sqlite", ".sqlite3")):
+                        found.add(Path(folder) / filename)
+        except PermissionError:
+            denied = True
+    return sorted(p for p in found if p.is_file()), denied
 
 
 def clean(value):
@@ -111,11 +120,15 @@ def read_database(path):
 
 def main():
     try:
-        for path in candidate_databases():
+        paths, denied = candidate_databases()
+        for path in paths:
             result = read_database(path)
             if result:
                 print(json.dumps(result, ensure_ascii=False))
                 return
+        if denied:
+            print(json.dumps({"status": "permission_required", "books": []}))
+            return
         print(json.dumps({"status": "not_found", "books": []}))
     except (sqlite3.Error, OSError, ValueError) as error:
         # Keep user paths out of dashboard state and diagnostic messages.

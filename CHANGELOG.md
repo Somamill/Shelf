@@ -1,3 +1,8 @@
+## 0.1.29
+
+- Detect macOS privacy blocking the local Apple Books database instead of misreporting an empty library.
+- Add a direct shortcut to Full Disk Access settings and explain the one-time permission needed for Apple Books progress.
+
 ## 0.1.28
 
 - Add an optional, read-only Apple Books audiobook progress shelf using the local Books library database when it is available on this Mac.

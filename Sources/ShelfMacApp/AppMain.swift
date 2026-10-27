@@ -343,6 +343,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "openAppleBooks":
             let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.iBooksX") ?? URL(fileURLWithPath:"/System/Applications/Books.app")
             NSWorkspace.shared.open(url)
+        case "openFullDiskAccessSettings":
+            if let url=URL(string:"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
         case "openBook": if let bookId=body["bookId"] as? Int { openBook(bookId) }
         case "chooseEPUBImport": chooseEPUBImports()
         case "saveProgressMatch": if let document=body["document"] as? String, let bookId=body["bookId"] as? Int { saveProgressMatch(document,bookId:bookId) }
