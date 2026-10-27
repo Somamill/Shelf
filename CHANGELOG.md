@@ -1,3 +1,9 @@
+## 0.1.27
+
+- Add an always-visible audiobook shelf driven by Hardcover reading status, including BookPlayer titles when synced.
+- Show listening percentages only when a connected source provides actual audio position and duration; explain the current BookPlayer progress limitation in the dashboard.
+- Add BookPlayer and Hardcover connection shortcuts and include audiobook activity in reading statistics.
+
 ## 0.1.26
 
 - Link launchd stderr/stdout files to their main job logs so a later successful run clears old traceback entries from current errors.
