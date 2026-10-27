@@ -339,6 +339,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "syncReadwiseReader": syncReadwiseReader()
         case "openBookPlayer": if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") { NSWorkspace.shared.open(url) }
         case "loadBooks": loadBooks()
+        case "loadAppleBooks": loadAppleBooks()
+        case "openAppleBooks":
+            let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.iBooksX") ?? URL(fileURLWithPath:"/System/Applications/Books.app")
+            NSWorkspace.shared.open(url)
         case "openBook": if let bookId=body["bookId"] as? Int { openBook(bookId) }
         case "chooseEPUBImport": chooseEPUBImports()
         case "saveProgressMatch": if let document=body["document"] as? String, let bookId=body["bookId"] as? Int { saveProgressMatch(document,bookId:bookId) }
@@ -484,6 +488,22 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             payload["finished"]=finished
             payload["allBooks"]=allBooks
             DispatchQueue.main.async { self.send("bookshelfData",payload) }
+        }
+    }
+
+    private func loadAppleBooks() {
+        guard let script=Bundle.main.resourceURL?.appendingPathComponent("apple_books.py").path else {
+            send("appleBooksData",["status":"unavailable","books":[]]); return
+        }
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let result=Self.run("/usr/bin/python3",[script])
+            guard result.code == 0, let bytes=result.output.data(using:.utf8),
+                  let payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any] else {
+                DispatchQueue.main.async { self.send("appleBooksData",["status":"unavailable","books":[]]) }
+                return
+            }
+            DispatchQueue.main.async { self.send("appleBooksData",payload) }
         }
     }
 

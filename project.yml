@@ -26,6 +26,7 @@ targets:
       - path: Sources/ShelfCore/Tools/boox_settings.py
       - path: Sources/ShelfCore/Tools/boox_rotation.py
       - path: Sources/ShelfCore/Tools/readwise_reader_sync.py
+      - path: Sources/ShelfCore/Tools/apple_books.py
       - path: Config/config.example.json
     dependencies:
       - package: ShelfCore
@@ -34,8 +35,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.27
-        CURRENT_PROJECT_VERSION: 28
+        MARKETING_VERSION: 0.1.28
+        CURRENT_PROJECT_VERSION: 29
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES

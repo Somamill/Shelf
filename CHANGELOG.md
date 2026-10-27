@@ -1,3 +1,8 @@
+## 0.1.28
+
+- Add an optional, read-only Apple Books audiobook progress shelf using the local Books library database when it is available on this Mac.
+- Explain when Apple Books has not synced a local library and handle private database schema changes without interrupting the dashboard.
+
 ## 0.1.27
 
 - Add an always-visible audiobook shelf driven by Hardcover reading status, including BookPlayer titles when synced.
