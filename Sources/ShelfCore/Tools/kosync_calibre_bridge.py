@@ -198,6 +198,29 @@ def crosspoint_document_metadata():
         log(f"WARNING could not read device title metadata: {type(e).__name__}")
         return {}
 
+def crosspoint_progress_records():
+    """Read local CrossPoint Sync progress as well as the legacy Redis server."""
+    if not os.path.isfile(CROSSPOINT_DB):
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{CROSSPOINT_DB}?mode=ro", uri=True, timeout=3)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("""
+                SELECT p.document, p.percentage, p.progress, p.device, p.device_id,
+                       p.updated_at AS timestamp, d.title, d.author, d.filename
+                  FROM progress p
+                  JOIN users u ON u.id=p.user_id
+                  LEFT JOIN documents d ON d.user_id=p.user_id AND d.document=p.document
+                 WHERE u.username=?
+            """, (USERNAME,)).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        log(f"WARNING could not read CrossPoint Sync progress: {type(e).__name__}")
+        return []
+
 def automatic_book_match(title, author, identities, filename="", identifiers=None):
     """Return a ranked suggestion only when identity evidence is meaningful."""
     wanted_identifiers = normalized_identifiers(identifiers)
@@ -520,29 +543,55 @@ def main():
             "--pattern", f"user:{USERNAME}:document:*",
         ]).stdout.splitlines()
 
-        found = 0
-        latest_by_book = {}
-        unmatched = []
-
+        # Combine the older Redis-backed KOSync endpoint with the newer local
+        # CrossPoint Sync database. Prefer the newest record for a document,
+        # while carrying any metadata the Redis version does not retain.
+        records = {}
         for key in keys:
-
             prefix = f"user:{USERNAME}:document:"
             if not key.startswith(prefix):
                 continue
-
-            if key == f"user:{USERNAME}:key":
-                continue
-            digest = key[len(prefix):]
-
+            digest = key[len(prefix):].lower()
             percentage = redis("HGET", key, "percentage")
-            progress = redis("HGET", key, "progress")
-            device = redis("HGET", key, "device")
-            device_id = redis("HGET", key, "device_id")
-            timestamp = redis("HGET", key, "timestamp")
             if not percentage:
                 continue
+            records[digest] = {
+                "document": digest,
+                "percentage": percentage,
+                "progress": redis("HGET", key, "progress"),
+                "device": redis("HGET", key, "device"),
+                "device_id": redis("HGET", key, "device_id"),
+                "timestamp": redis("HGET", key, "timestamp"),
+                "_redis_key": key,
+            }
+        for record in crosspoint_progress_records():
+            digest = str(record.get("document") or "").lower()
+            if not digest or record.get("percentage") is None:
+                continue
+            previous = records.get(digest)
+            try:
+                is_newer = previous is None or int(record.get("timestamp") or 0) >= int(previous.get("timestamp") or 0)
+            except (TypeError, ValueError):
+                is_newer = previous is None
+            if is_newer:
+                if previous:
+                    for field in ("title", "author", "filename"):
+                        record[field] = record.get(field) or previous.get(field)
+                records[digest] = record
+            elif previous:
+                for field in ("title", "author", "filename"):
+                    previous[field] = previous.get(field) or record.get(field)
 
-            found += 1
+        found = len(records)
+        latest_by_book = {}
+        unmatched = []
+
+        for digest, record in records.items():
+            percentage = record.get("percentage")
+            progress = record.get("progress")
+            device = record.get("device")
+            device_id = record.get("device_id")
+            timestamp = record.get("timestamp")
 
             book_id = mapping.get(digest)
             old_suggestion = saved_suggestions.get(digest.lower())
@@ -552,11 +601,14 @@ def main():
             filename = ""
 
             if book_id is None:
-                metadata = redis_book_metadata(key)
+                metadata = redis_book_metadata(record["_redis_key"]) if record.get("_redis_key") else {}
                 stored = remote_metadata.get(digest.lower(), {})
                 for field in ("title", "author", "authors", "filename", "identifiers", "identifier", "isbn", "uuid"):
                     if not metadata.get(field) and stored.get(field):
                         metadata[field] = stored[field]
+                for field in ("title", "author", "filename"):
+                    if not metadata.get(field) and record.get(field):
+                        metadata[field] = record[field]
                 title = str(metadata.get("title") or (old_suggestion or {}).get("source_title") or "").strip()
                 author = str(metadata.get("author") or metadata.get("authors") or (old_suggestion or {}).get("source_author") or "").strip()
                 filename = str(metadata.get("filename") or stored.get("filename") or (old_suggestion or {}).get("source_filename") or "").strip()

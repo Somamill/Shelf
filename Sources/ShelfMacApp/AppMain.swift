@@ -337,7 +337,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "saveReadwiseReaderToken": saveReadwiseReaderToken(body["token"] as? String ?? "")
         case "disconnectReadwiseReader": disconnectReadwiseReader()
         case "syncReadwiseReader": syncReadwiseReader()
-        case "openBookPlayer": if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") { NSWorkspace.shared.open(url) }
+        case "openBookPlayer":
+            if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") {
+                NSWorkspace.shared.open(url)
+            } else {
+                notify("BookPlayer runs on your iPhone. Its synced reading status appears here when Hardcover is connected.")
+            }
         case "loadBooks": loadBooks()
         case "loadAppleBooks": loadAppleBooks()
         case "openAppleBooks":
@@ -346,6 +351,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "openFullDiskAccessSettings":
             if let url=URL(string:"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
         case "openBook": if let bookId=body["bookId"] as? Int { openBook(bookId) }
+        case "setBookFinished":
+            if let bookId=body["bookId"] as? Int {
+                setBookFinished(bookId, finished: body["finished"] as? Bool ?? true)
+            }
         case "chooseEPUBImport": chooseEPUBImports()
         case "saveProgressMatch": if let document=body["document"] as? String, let bookId=body["bookId"] as? Int { saveProgressMatch(document,bookId:bookId) }
         case "loadDiscovery": loadDiscovery(body["period"] as? String ?? "weekly")
@@ -572,6 +581,23 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                         self.readerWebView?.evaluateJavaScript("window.readerSetResume && window.readerSetResume(\(saved));",completionHandler:nil)
                     }
                 }
+            }
+        }
+    }
+
+    private func setBookFinished(_ bookId:Int, finished:Bool) {
+        guard bookId > 0 else { return }
+        let script=Bundle.main.resourceURL?.appendingPathComponent("shelf_book_actions.py").path ?? "\(home)/Shelf/shelf_book_actions.py"
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let result=Self.run("/usr/bin/python3",[script,String(bookId),finished ? "finished" : "reading"])
+            DispatchQueue.main.async {
+                guard result.code == 0 else {
+                    self.notify("Could not update this book’s finished status.")
+                    return
+                }
+                self.notify(finished ? "Marked as finished." : "Moved back to your reading list.")
+                self.loadBooks()
             }
         }
     }

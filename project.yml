@@ -14,20 +14,37 @@ targets:
     platform: macOS
     sources:
       - path: Sources/ShelfMacApp
-    resources:
+      # XcodeGen currently drops target-level resources when a source path is
+      # a nested directory. Keep resources explicit in sources with their
+      # build phase so the generated app always contains the dashboard/tools.
       - path: Resources/Dashboard/index.html
+        buildPhase: resources
       - path: Resources/Dashboard/style.css
+        buildPhase: resources
       - path: Resources/Dashboard/app.js
+        buildPhase: resources
       - path: Resources/Icons/AppIcon.icns
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/bookshelf.py
+        buildPhase: resources
+      - path: Sources/ShelfCore/Tools/shelf_book_actions.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/reader_book.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/kosync_calibre_bridge.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/shelf_config.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/boox_settings.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/boox_rotation.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/readwise_reader_sync.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/apple_books.py
+        buildPhase: resources
       - path: Config/config.example.json
+        buildPhase: resources
     dependencies:
       - package: ShelfCore
         product: ShelfCore
@@ -35,8 +52,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.29
-        CURRENT_PROJECT_VERSION: 30
+        MARKETING_VERSION: 0.1.30
+        CURRENT_PROJECT_VERSION: 31
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES

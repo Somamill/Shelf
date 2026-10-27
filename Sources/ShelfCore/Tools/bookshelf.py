@@ -12,6 +12,16 @@ BOOKS_ROOT = configured_path('booksRoot', '~/Books')
 LIBRARY = configured_path('library', str(BOOKS_ROOT / 'Calibre Library'))
 DB = LIBRARY / 'metadata.db'
 UNMATCHED_FILE = configured_path('state', str(BOOKS_ROOT / 'state')) / 'kosync-calibre-unmatched.json'
+FINISHED_OVERRIDE_FILE = configured_path('state', str(BOOKS_ROOT / 'state')) / 'shelf-finished-books.json'
+
+
+def finished_overrides():
+    try:
+        payload = json.loads(FINISHED_OVERRIDE_FILE.read_text(encoding='utf-8'))
+        values = payload.get('bookIds', []) if isinstance(payload, dict) else []
+        return {int(value) for value in values if str(value).isdigit()}
+    except (OSError, ValueError, TypeError):
+        return set()
 
 
 def main():
@@ -81,6 +91,7 @@ def main():
     books = []
     reading = []
     finished = []
+    manually_finished = finished_overrides()
     for row in rows:
         raw = row['progress']
         try:
@@ -129,8 +140,10 @@ def main():
         # differing page counts. Shelf treats 97% as complete without changing
         # Calibre's saved progress value.
         marked_finished = str(row['device_finished'] or '').strip().lower() in {'1', 'true', 'yes'}
-        if marked_finished or (progress is not None and progress >= 0.97):
+        manual_finished = int(row['id']) in manually_finished
+        if manual_finished or marked_finished or (progress is not None and progress >= 0.97):
             book['finished'] = True
+            book['manuallyFinished'] = manual_finished
             finished.append(book)
         elif progress is not None and progress > 0:
             reading.append(book)

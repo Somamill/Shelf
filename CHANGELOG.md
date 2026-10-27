@@ -1,3 +1,10 @@
+## 0.1.30
+
+- Combines Calibre, Hardcover and Apple Books into one deduplicated shelf with simple source-aware actions and reading filters.
+- Adds a persistent “Mark finished” action without overwriting Calibre progress and keeps manually finished books out of Continue reading.
+- Improves title matching across audiobook and ebook editions and displays reading and listening progress separately.
+- Verifies CrossPoint/KOSync device settings and documents that the reader must initiate a sync when it reconnects to Wi-Fi.
+
 ## 0.1.29
 
 - Detect macOS privacy blocking the local Apple Books database instead of misreporting an empty library.

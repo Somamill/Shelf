@@ -259,6 +259,33 @@ html[data-theme="light"] .notice{background:#fff6e3;color:#805a10;border-color:#
 html[data-theme="light"] .finished-label{color:#26764f!important}.book-finished{background:rgba(239,247,242,.68)!important}
 @media(prefers-reduced-transparency:reduce){html[data-theme="light"] .sidebar,html[data-theme="light"] .host,html[data-theme="light"] .secure,html[data-theme="light"] .stat,html[data-theme="light"] .service-card,html[data-theme="light"] .automation-card,html[data-theme="light"] .connect-card,html[data-theme="light"] .details-card,html[data-theme="light"] .table-card,html[data-theme="light"] .activity-card,html[data-theme="light"] .note,html[data-theme="light"] .update-card,html[data-theme="light"] .reading-book,html[data-theme="light"] .discover-book,html[data-theme="light"] .all-book-card,html[data-theme="light"] .connector-card,html[data-theme="light"] .unmatched-card,html[data-theme="light"] .integration-hero,html[data-theme="light"] .books-hero,html[data-theme="light"] .setup-card,html[data-theme="light"] .setup-hero,html[data-theme="light"] .paste-error,html[data-theme="light"] .hardcover-background,html[data-theme="light"] .epub-drop,html[data-theme="light"] .hero,html[data-theme="light"] .discover-banner{backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff}}
 
+/* A single, compact shelf: each title appears once with its reading options. */
+.book-shelf-filters{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 10px}
+.book-shelf-filters button{border:1px solid var(--glass-stroke);border-radius:999px;padding:7px 13px;background:var(--glass-surface);color:var(--muted);font:600 11px -apple-system,BlinkMacSystemFont;cursor:pointer;transition:background .16s ease,color .16s ease,transform .16s ease}
+.book-shelf-filters button.active{background:#202023;color:#fff;border-color:#202023}
+.book-shelf-filters button:hover,.book-card-actions .small-btn:hover{transform:translateY(-1px)}
+.all-books-grid.list-view{grid-template-columns:1fr;gap:9px}
+.all-books-grid.list-view .all-book-card{display:grid;grid-template-columns:58px minmax(0,1fr);align-items:center;gap:13px;padding:11px 14px;min-height:94px;border-radius:15px}
+.all-books-grid.list-view .all-book-cover{height:72px;width:52px;min-height:72px;border-radius:6px}
+.all-books-grid.list-view .all-book-cover img{width:100%;height:100%;object-fit:cover}
+.all-books-grid.list-view .all-book-meta{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(100px,.8fr) minmax(130px,1fr);align-items:center;gap:6px 13px;padding:0}
+.all-books-grid.list-view .all-book-meta>b{grid-column:1;min-height:0;font-size:12px}
+.all-books-grid.list-view .all-book-meta>span{grid-column:2;min-height:0;font-size:10px}
+.book-source-badges{display:flex;gap:5px;flex-wrap:wrap}
+.book-source-badges small{width:max-content;padding:3px 7px;border:1px solid var(--glass-stroke);border-radius:999px;background:var(--glass-raised);font-size:8px!important;color:var(--muted)}
+.book-card-actions{grid-column:3;grid-row:1 / span 6;display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.book-card-actions .small-btn{margin:0!important;white-space:nowrap}
+.book-card-actions .primary-action{background:#0a84ff;color:#fff;border-color:#0a84ff}
+.book-card-actions .finish-action{color:#257451}
+.all-books-grid.list-view .book-details{grid-column:1 / 3;max-width:100%}
+html[data-theme="dark"] .book-shelf-filters button{background:#171719;color:var(--muted);border-color:var(--glass-stroke)}
+html[data-theme="dark"] .book-shelf-filters button.active{background:#f5f5f7;color:#111;border-color:#f5f5f7}
+html[data-theme="dark"] .book-source-badges small{background:#1a1a1d;color:var(--muted);border-color:#363639}
+html[data-theme="dark"] .book-card-actions .primary-action{background:#0a84ff;color:#fff}
+html[data-theme="dark"] .book-card-actions .finish-action{color:#7bd9a8}
+@media(max-width:900px){.all-books-grid.list-view .all-book-meta{grid-template-columns:minmax(120px,1fr) minmax(100px,1fr)}.book-card-actions{grid-column:1 / -1;grid-row:auto;justify-content:flex-start}}
+@media(max-width:600px){.all-books-grid.list-view .all-book-meta{display:flex;align-items:flex-start}.all-books-grid.list-view .all-book-meta>b,.all-books-grid.list-view .all-book-meta>span{width:100%}.book-card-actions{width:100%}}
+
 /* Keep nested cards and utility surfaces in the selected palette too. */
 html[data-theme="dark"] .page article:not(.hero),html[data-theme="dark"] .page .empty-books,html[data-theme="dark"] .page .book-details,html[data-theme="dark"] .page .library-tools,html[data-theme="dark"] .page .book-filter,html[data-theme="dark"] .page .connect-row,html[data-theme="dark"] .page .integration-row{background-color:var(--glass-surface);color:var(--ink);border-color:var(--glass-stroke)}
 html[data-theme="dark"] input,html[data-theme="dark"] select,html[data-theme="dark"] textarea{color-scheme:dark}
