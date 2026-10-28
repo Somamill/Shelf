@@ -1,3 +1,135 @@
+## 0.1.35
+
+- Refresh the public app screenshots with current Books, Connections, and Reading Statistics views using fictional sample data.
+- Update the README version, installation notes, and screenshot gallery to match this release candidate.
+
+## 0.1.34
+
+- Added a first-launch quick setup that detects common Calibre library locations and prepares the incoming-books folder automatically; optional services can be connected later.
+- Added a read-only library health summary for missing covers, authors, formats, and possible duplicate records.
+- Added opt-in Calibre full-text search with low-resource indexing controls and bounded command time.
+- Added DMG packaging and a Homebrew cask for installing signed releases.
+- Bundled universal Python runtimes so installed copies do not require Xcode, Command Line Tools, or a separate Python install.
+
+## 0.1.33
+
+- Added resilient book-cover fallbacks: failed artwork no longer leaves blank cards, and missing covers are fetched lazily from Open Library with a small request queue.
+- Added brief compositor-friendly page, card, and cover transitions that respect macOS Reduce Motion and run at the display's supported refresh rate.
+- Enlarged the minimalist book artwork within the Dock/app icon canvas.
+- Reworked the GitHub README with current feature scope, privacy notes, setup steps, project map, and an app screenshot.
+- Paginated the large shelf and moved local cover loading to visible book cards to keep WebKit responsive; external covers are borrowed from connected book sources before a throttled Open Library lookup.
+- Tightened source matching to retain subtitles and series names, normalize Japanese author spacing, and collapse exact duplicate records into one shelf card without deleting Calibre data.
+- Audited Calibre and sync data: 5 duplicate title/author groups were found after Unicode normalization and are grouped in the shelf; Calibre and OPDS authentication, KOReader Sync, CrossPoint Sync, and Readwise Reader were reachable. Three Readest progress records remain unmatchable because they contain only opaque file IDs and have no exact local file hash match.
+
+## 0.1.32
+
+- Counts all Calibre formats as library books and includes Apple Books ebooks and audiobooks in the shared reading shelf.
+- Uses Shelf's native Apple Books database reader for catalog imports and skips matching titles already in Calibre.
+- Shows Apple Books access state in the Books view and distinguishes reading from listening progress.
+- Confirms the saved Readwise Reader token against its API and displays the connection as active.
+- Keeps Xteink settings enforced at login and every five minutes; current CrossPoint firmware still requires a device-side sync action.
+
+## 0.1.31
+
+- Replaces the Overview and left sidebar with a floating bottom navigation bar and opens directly to My Books.
+- Adds focused Bright and true OLED Black themes across all dashboard surfaces.
+- Includes Apple Books titles and audiobooks in the unified book view and provides a metadata-only Calibre catalog import that never copies protected files.
+- Opens any supported local Calibre format in its default Mac app while keeping EPUBs in Shelf's reader.
+- Saves and verifies the previously supplied Readwise Reader token after detecting the missing local credential.
+- Clarifies that CrossPoint currently requires a device-side progress sync; its long-press action is set to launch sync directly and Smart Sync stays enabled.
+
+## 0.1.30
+
+- Combines Calibre, Hardcover and Apple Books into one deduplicated shelf with simple source-aware actions and reading filters.
+- Adds a persistent “Mark finished” action without overwriting Calibre progress and keeps manually finished books out of Continue reading.
+- Improves title matching across audiobook and ebook editions and displays reading and listening progress separately.
+- Verifies CrossPoint/KOSync device settings and documents that the reader must initiate a sync when it reconnects to Wi-Fi.
+
+## 0.1.29
+
+- Detect macOS privacy blocking the local Apple Books database instead of misreporting an empty library.
+- Add a direct shortcut to Full Disk Access settings and explain the one-time permission needed for Apple Books progress.
+
+## 0.1.28
+
+- Add an optional, read-only Apple Books audiobook progress shelf using the local Books library database when it is available on this Mac.
+- Explain when Apple Books has not synced a local library and handle private database schema changes without interrupting the dashboard.
+
+## 0.1.27
+
+- Add an always-visible audiobook shelf driven by Hardcover reading status, including BookPlayer titles when synced.
+- Show listening percentages only when a connected source provides actual audio position and duration; explain the current BookPlayer progress limitation in the dashboard.
+- Add BookPlayer and Hardcover connection shortcuts and include audiobook activity in reading statistics.
+
+## 0.1.26
+
+- Link launchd stderr/stdout files to their main job logs so a later successful run clears old traceback entries from current errors.
+
+## 0.1.25
+
+- Use the nearest preceding run timestamp for log entries without their own timestamp, preventing old multiline errors from appearing newly active.
+
+## 0.1.24
+
+- Clear a stale launch-agent failure status when the bridge log proves a later successful run, so an old timeout cannot keep the bridge marked as an error.
+
+## 0.1.23
+
+- Automatically hide old log errors after the same job records a successful recovery, and age out issues after seven days in diagnostic exports.
+- Make Setup and Reader Setup controls follow the selected OLED, System, or Light theme consistently.
+
+## 0.1.22
+
+- Stop reporting historical 20-second Calibre bridge timeouts after the timeout fix is installed.
+
+## 0.1.21
+
+- Keep reader Follow Shelf colors in sync while the reader window remains open.
+
+## 0.1.20
+
+- Match Calibre's 120-second network timeout so slow progress updates do not fail at 20 seconds.
+- Read existing sync metadata and write only fields that changed, reducing bridge time and repeated log noise.
+- Make recently added book cards follow the dashboard's OLED and System palettes.
+- Make the reader follow Shelf appearance by default, including true black in OLED mode, while retaining reader color choices.
+- Sort the reader chapter menu by actual book document order instead of EPUB navigation-list order.
+
+## 0.1.19
+
+- Unify light appearance so navigation, cards, controls and book views share one balanced palette.
+- Make OLED mode consistently black across all dashboard pages, cards, forms and controls.
+- Make System appearance follow macOS changes immediately and safely handle unavailable local preferences.
+- Remove conflicting legacy theme layers that caused light and dark surfaces to mix.
+
+## 0.1.18
+
+- Remove all runtime Keychain access from Shelf to prevent repeated Keychain dialogs.
+- Store passwords and API tokens in owner-only local credential files with restricted file permissions.
+- Keep scheduled jobs inside Operations so they no longer appear on the Books and other pages.
+
+## 0.1.17
+
+- Add a visible System / OLED black appearance picker so OLED mode works even if WKWebView misses the macOS appearance signal.
+- Set the dashboard document color scheme to support both light and dark native controls.
+
+## 0.1.16
+
+- Combine reader setup with Setup and scheduled jobs with service operations.
+- Add reading statistics for saved progress, reader sync activity and connected tracking APIs.
+- Follow macOS appearance with an OLED-black Dark Mode and Liquid Glass controls.
+- Keep service, book and provider data on automatic refresh; present sync and backup log entries in plain language.
+- Hide old resolved issues from current diagnostics and keep each exported report based on fresh status and recent log tails.
+- Restrict Shelf credential reads to non-interactive, non-synchronizable local Keychain items to stop repeated iCloud Keychain prompts.
+- Keep book labels focused on title and author rather than internal file IDs or extensions.
+
+## 0.1.15
+
+- Keep Calibre covers visible in Finished and add a Recently added shelf.
+- Show complete Calibre metadata in compact, expandable book details.
+- Merge matching Hardcover records into the matching local book using title and author evidence.
+- Stabilize local app signing and give Shelf credentials a persistent app access list to prevent repeat Keychain prompts.
+- Add reduced-motion-friendly page and book transitions, refine the smaller book icon, and display activity times in the Mac’s local time zone.
+
 ## 0.1.14
 
 - Treat 97% reading progress as finished in Calibre and Shelf, remove those books from Continue reading, and show them in Finished.

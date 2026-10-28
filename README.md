@@ -1,35 +1,87 @@
 # Shelf
 
-**Current release: 0.1.13** — an early macOS release. See [GitHub Releases](https://github.com/Somamill/Shelf/releases) for downloads and notes.
+**A calm, unified reading dashboard for macOS.** Shelf brings your Calibre library, reading progress, connected services, and supported devices into one place while keeping your book files under your control.
 
-Shelf is a native macOS reading dashboard for a Calibre library. It includes a searchable Calibre bookshelf with cover-grid and compact-list views, a paginated EPUB reader, reading-progress and highlight sync, setup wizard, service health, and optional device configuration. The setup model is shared in `ShelfCore` so an iPhone companion can be added later.
+<p align="center">
+  <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
+</p>
 
-## macOS setup
+> Current version: **0.1.35** · macOS · MIT licensed
 
-1. Install Xcode or the Xcode Command Line Tools, plus Python 3.
-2. Open `Shelf.xcodeproj` in Xcode, or run `Scripts/build-and-install.sh` to build and install `Shelf.app`.
-3. Complete the Setup screen. Choose a local Calibre library, an EPUB import folder, devices, and available sync servers.
-4. If using OneDrive or Google Drive, install the provider's official macOS sync app and choose its local folder as the import destination. Shelf does not ask for or store cloud-provider passwords.
+## What Shelf does
 
-The project has no third-party Swift package dependencies. `project.yml` is the XcodeGen source spec; install XcodeGen only if you need to regenerate the checked-in Xcode project after changing that spec. See [Dependencies](Documentation/DEPENDENCIES.md) and [Architecture](Documentation/ARCHITECTURE.md).
+- **One shelf across sources.** Browse Calibre titles and formats alongside reading records from Apple Books, Hardcover, and connected readers. Matching uses title and author evidence so different editions can share one shelf entry.
+- **Covers and metadata.** Loads embedded Calibre covers, then tries the public Open Library cover catalog for missing artwork. If no reliable cover is available, Shelf shows a readable title card instead of an empty image box. A read-only library health summary points out missing covers, authors, formats, and likely duplicate records. Optional full-text search uses Calibre’s slow indexing mode and only starts after you enable it.
+- **Read and track.** Open EPUBs in the built-in paginated reader, keep progress and highlights, and view finish status and reading statistics.
+- **Sync services.** Check Calibre, KOReader Sync, CrossPoint, Hardcover, Readwise, and Readwise Reader connections from the dashboard.
+- **Device setup.** Configure supported KOReader/CrossPoint readers and see when a reader last sent progress. A disconnected reader can only upload after it reconnects to Wi-Fi.
+- **A focused interface.** Choose Black (OLED black) or Bright. Motion follows macOS reduced-motion settings and uses native WebKit timing at the display’s supported refresh rate.
 
-## Cloud and Calibre library safety
+### Shelf in action
 
-The selected cloud folder is for EPUB intake and other user-managed files. Keep Calibre's active library and `metadata.db` on local storage. Calibre warns against running file sync while its library is open and says Google Drive is incompatible with a live Calibre library. Use the Calibre Content Server for access from other devices. [Calibre FAQ](https://manual.calibre-ebook.com/faq.html)
+These showcase images use illustrative sample books and connection states. They do not contain a personal library, account details, or local network addresses.
 
-The macOS app uses the system folder picker and persists its folder choices in a private per-user configuration. Passwords and sync keys entered in Setup are stored in macOS Keychain. No OAuth credentials for Google or Microsoft are requested.
+| Bookshelf and EPUB import | Connected reading services | Reading statistics |
+| --- | --- | --- |
+| ![Shelf bookshelf and EPUB import](Documentation/Screenshots/library.png) | ![Shelf service connections](Documentation/Screenshots/connections.png) | ![Shelf reading statistics](Documentation/Screenshots/reading-statistics.png) |
 
-## Current and planned support
+## Install and build
 
-- **Available now:** macOS setup, Calibre bookshelf/reader, local folder import, KOReader Sync/CrossPoint endpoints, Hardcover and Readwise connector status, and optional Mac service controls.
-- **Readwise Reader:** pull progress and highlights into matching local EPUBs and connected KOReader sync. Highlights from Shelf can be sent to a matching Readwise Reader EPUB.
-- **Future:** a native iPhone target using the shared `ShelfCore` models and iOS Files document picker for iCloud Drive and third-party File Provider locations.
-- **Not included yet:** direct Google Drive or Microsoft Graph OAuth/API sync. Current OneDrive/Google Drive support uses files made available by their official desktop sync clients.
+### Install a release
 
-## Optional local integrations
+Download the latest notarized [Shelf DMG](https://github.com/Somamill/Shelf/releases/latest) and drag Shelf into Applications. Homebrew users can install the same signed release with:
 
-Backup, import, audit, and safety actions can call scripts in the configured scripts directory. Those are optional adapters and are not required for the built-in reader or progress mapping. Docker, Homebrew, Android Debug Bridge, Restic, EPUBCheck, and ClamAV are needed only when their corresponding integrations are enabled.
+```sh
+brew install --cask Somamill/Shelf/shelf
+```
 
-## Security and support
+The downloaded app runs without Xcode, Command Line Tools, or a separate Python installation. The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
 
-Review the private configuration and diagnostic ZIP before sharing them. Do not commit API keys, passwords, library data, or exported logs. See [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), and [Architecture](Documentation/ARCHITECTURE.md).
+### Build from source
+
+Requirements: macOS 14 or later, Xcode, Python 3, and a local Calibre library.
+
+```sh
+git clone https://github.com/Somamill/Shelf.git
+cd Shelf
+Scripts/build-and-install.sh
+```
+
+To package a locally built app for testing, run `Scripts/package-dmg.sh /Applications/Shelf.app`. Public releases use Developer ID signing and Apple notarization; see [release setup](Documentation/RELEASING.md).
+
+## Set up your reading sources
+
+1. Choose a local Calibre library and a folder for incoming books.
+2. Add the services and devices you use under **Connections** and **Setup**.
+3. Keep Calibre’s active library on local storage. Use iCloud Drive, OneDrive, or Google Drive only for incoming files that their official sync app downloads to this Mac. Do not sync Calibre’s live database folder through a cloud drive.
+4. On CrossPoint/KOReader devices, enable document metadata and sync when the reader is back online. Shelf processes a reader upload automatically; it cannot make a disconnected device upload over Wi-Fi.
+
+Apple Books support reads the locally synced Books database on this Mac and reports available progress. Protected Apple Books files stay in Books; Shelf does not copy or alter them. Catalog metadata import is separate from importing book files.
+
+## Privacy and data safety
+
+- Shelf reads Calibre metadata and cover files locally. User passwords and API keys are kept in owner-only files under `~/Library/Application Support/Shelf`.
+- Apple Books data is read locally. The catalog importer creates metadata-only Calibre entries and does not copy protected book content.
+- Shelf does not upload your library to a Shelf-operated cloud service. Connected services receive only the data needed for the enabled sync feature.
+- Review diagnostic exports before sharing. Never commit credentials, private library databases, or personal logs.
+
+## Project layout
+
+```text
+Sources/ShelfCore/       Shared models and core logic
+Sources/ShelfMacApp/     Native macOS application and service adapters
+Resources/Dashboard/     Shelf dashboard and reader interface
+Resources/Icons/         App icon and macOS icon set
+Scripts/                 Build and optional maintenance helpers
+Documentation/           Architecture, dependencies, and screenshots
+```
+
+See [Architecture](Documentation/ARCHITECTURE.md), [Dependencies](Documentation/DEPENDENCIES.md), [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), and [Changelog](CHANGELOG.md).
+
+## Scope
+
+Shelf is currently a macOS app. The shared core is structured to support a future iPhone companion, but an iPhone app and direct Google Drive/Microsoft Graph integrations are not included in this release. Cloud-drive support means using files that the provider’s official macOS sync client has made available locally.
+
+## License
+
+Shelf is released under the [MIT License](LICENSE).

@@ -1,13 +1,17 @@
 # Dependencies
 
-## App build
+## Install Shelf
+
+- macOS 14 or later.
+- No Xcode, Command Line Tools, Python, or Homebrew installation is required. Shelf’s DMG includes a universal CPython runtime for its local helpers.
+
+## Build Shelf from source
 
 - Xcode 16 or later / macOS Command Line Tools with Swift, AppKit, WebKit, Foundation, Security, and CryptoKit.
-- macOS 14 or later for the desktop app.
-- Python 3 and the standard library for the included local book and progress helpers.
+- Python 3.13 is downloaded and checksum-verified by `Scripts/download-python-runtime.sh` for universal local builds.
 - Node.js only for the optional JavaScript syntax check.
 
-There are no third-party Swift packages in the current app. `ShelfCore` uses Foundation only and declares iOS 17 compatibility for future reuse.
+The embedded Python runtime is CPython from Astral’s python-build-standalone release; its upstream licenses remain in the app bundle under `Resources/PythonRuntime`. There are no third-party Swift packages in the current app. `ShelfCore` uses Foundation only and declares iOS 17 compatibility for future reuse.
 
 ## Optional integrations
 

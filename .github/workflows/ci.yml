@@ -23,6 +23,8 @@ jobs:
           node-version: '22'
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Prepare bundled universal Python runtime
+        run: Scripts/download-python-runtime.sh
       - name: Build shared Swift package
         run: swift build
       - name: Validate scripts and dashboard JavaScript

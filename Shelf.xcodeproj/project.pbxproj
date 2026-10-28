@@ -7,14 +7,48 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C635D4432F5139126A71EA0 /* calibre_fts.py in Resources */ = {isa = PBXBuildFile; fileRef = 20096C905A07887BF87BAB46 /* calibre_fts.py */; };
+		13E36FA69283CDE12CBBBBF5 /* config.example.json in Resources */ = {isa = PBXBuildFile; fileRef = 651C15DF7B8D47C401DD2135 /* config.example.json */; };
+		169E70579C1BB94E8C32806F /* reader_book.py in Resources */ = {isa = PBXBuildFile; fileRef = 7BFADF4D5203B98BD10D1181 /* reader_book.py */; };
+		1A9CAB3A150EEE451B9573A9 /* readwise_reader_sync.py in Resources */ = {isa = PBXBuildFile; fileRef = 71413F49BD77FBE2E13F3787 /* readwise_reader_sync.py */; };
+		20289FFE617A574C82A2556E /* open_library_book.py in Resources */ = {isa = PBXBuildFile; fileRef = 8EF8B349102C7D642FBD64F7 /* open_library_book.py */; };
+		2CEECEF5579850629BE85585 /* apple_books.py in Resources */ = {isa = PBXBuildFile; fileRef = E9D67CA3233AF59FB22C2DD3 /* apple_books.py */; };
+		49A0629B6694AFE1DEDAD4C6 /* style.css in Resources */ = {isa = PBXBuildFile; fileRef = C1D4B60D9296B03E4CA18373 /* style.css */; };
+		4B615E82AC373201608C95C9 /* boox_rotation.py in Resources */ = {isa = PBXBuildFile; fileRef = 650147434549546734006E3B /* boox_rotation.py */; };
+		5689FF5507B438A705170C38 /* shelf_book_actions.py in Resources */ = {isa = PBXBuildFile; fileRef = 2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */; };
+		5F0B527A57CBABFAF1644923 /* bookshelf.py in Resources */ = {isa = PBXBuildFile; fileRef = D2156C8B4C8FDE6BEB6035C9 /* bookshelf.py */; };
 		730CFB1D2ABC2638E99D0144 /* ShelfCore in Frameworks */ = {isa = PBXBuildFile; productRef = D3B3D7FE690B7CCB4CC75D90 /* ShelfCore */; };
+		78D22BA7AE6DC22342A3A2BA /* shelf_config.py in Resources */ = {isa = PBXBuildFile; fileRef = 729F6C853F3FDF0E021F87AA /* shelf_config.py */; };
+		78E3C712135EF62800ED0B25 /* boox_settings.py in Resources */ = {isa = PBXBuildFile; fileRef = 8B32A8A7EF187897DF2E7B13 /* boox_settings.py */; };
 		BDE45900DBB68F6ECA8E90E7 /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E2AEAFC476556B6591566B /* AppMain.swift */; };
+		C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 15975E75F118DA6A5F9DDC22 /* AppIcon.icns */; };
+		CA04118D7DFF0280FFF26873 /* app.js in Resources */ = {isa = PBXBuildFile; fileRef = 9096715045380B07144496A7 /* app.js */; };
+		DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */ = {isa = PBXBuildFile; fileRef = 32B8DD740E9D64ABA17E06E1 /* PythonRuntime */; };
+		ED671E2BE235BDD21A18A8D0 /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 5E4687CC9A77B219982C2592 /* index.html */; };
+		ED741A475C850F11E42A559E /* kosync_calibre_bridge.py in Resources */ = {isa = PBXBuildFile; fileRef = B3AF4E815C2B4AF0A1B40186 /* kosync_calibre_bridge.py */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		12B67EC8E0475301B4424C41 /* CalibreStackDashboard */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CalibreStackDashboard; path = .; sourceTree = SOURCE_ROOT; };
+		15975E75F118DA6A5F9DDC22 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		20096C905A07887BF87BAB46 /* calibre_fts.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = calibre_fts.py; sourceTree = "<group>"; };
+		2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_book_actions.py; sourceTree = "<group>"; };
+		32B8DD740E9D64ABA17E06E1 /* PythonRuntime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PythonRuntime; path = Resources/PythonRuntime; sourceTree = SOURCE_ROOT; };
 		33E2AEAFC476556B6591566B /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
+		5E4687CC9A77B219982C2592 /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
+		650147434549546734006E3B /* boox_rotation.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_rotation.py; sourceTree = "<group>"; };
+		651C15DF7B8D47C401DD2135 /* config.example.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = config.example.json; sourceTree = "<group>"; };
+		71413F49BD77FBE2E13F3787 /* readwise_reader_sync.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = readwise_reader_sync.py; sourceTree = "<group>"; };
+		729F6C853F3FDF0E021F87AA /* shelf_config.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_config.py; sourceTree = "<group>"; };
+		7BFADF4D5203B98BD10D1181 /* reader_book.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = reader_book.py; sourceTree = "<group>"; };
+		8B32A8A7EF187897DF2E7B13 /* boox_settings.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_settings.py; sourceTree = "<group>"; };
+		8EF8B349102C7D642FBD64F7 /* open_library_book.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = open_library_book.py; sourceTree = "<group>"; };
+		9096715045380B07144496A7 /* app.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = app.js; sourceTree = "<group>"; };
+		B3AF4E815C2B4AF0A1B40186 /* kosync_calibre_bridge.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = kosync_calibre_bridge.py; sourceTree = "<group>"; };
+		C1D4B60D9296B03E4CA18373 /* style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = style.css; sourceTree = "<group>"; };
 		C434CA69BBA8550DF6E411AC /* Shelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2156C8B4C8FDE6BEB6035C9 /* bookshelf.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = bookshelf.py; sourceTree = "<group>"; };
+		E9D67CA3233AF59FB22C2DD3 /* apple_books.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = apple_books.py; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -29,6 +63,32 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1A10CE5BD9604E26DA10208A /* Icons */ = {
+			isa = PBXGroup;
+			children = (
+				15975E75F118DA6A5F9DDC22 /* AppIcon.icns */,
+			);
+			path = Icons;
+			sourceTree = "<group>";
+		};
+		1A3B5E876D50A31BEBCBD351 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				E9D67CA3233AF59FB22C2DD3 /* apple_books.py */,
+				D2156C8B4C8FDE6BEB6035C9 /* bookshelf.py */,
+				650147434549546734006E3B /* boox_rotation.py */,
+				8B32A8A7EF187897DF2E7B13 /* boox_settings.py */,
+				20096C905A07887BF87BAB46 /* calibre_fts.py */,
+				B3AF4E815C2B4AF0A1B40186 /* kosync_calibre_bridge.py */,
+				8EF8B349102C7D642FBD64F7 /* open_library_book.py */,
+				7BFADF4D5203B98BD10D1181 /* reader_book.py */,
+				71413F49BD77FBE2E13F3787 /* readwise_reader_sync.py */,
+				2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */,
+				729F6C853F3FDF0E021F87AA /* shelf_config.py */,
+			);
+			path = Tools;
+			sourceTree = "<group>";
+		};
 		2EF3553876C623C95B57E5F5 /* ShelfMacApp */ = {
 			isa = PBXGroup;
 			children = (
@@ -45,6 +105,26 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		5C2AE7411A96E0DDA861916C /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				9096715045380B07144496A7 /* app.js */,
+				5E4687CC9A77B219982C2592 /* index.html */,
+				C1D4B60D9296B03E4CA18373 /* style.css */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		8C264FF1FCEC064A8A4E83D7 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				5C2AE7411A96E0DDA861916C /* Dashboard */,
+				1A10CE5BD9604E26DA10208A /* Icons */,
+				32B8DD740E9D64ABA17E06E1 /* PythonRuntime */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		AC1DA195D6463FE432930E9E /* Packages */ = {
 			isa = PBXGroup;
 			children = (
@@ -53,18 +133,37 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		CAB15F29C2C17C26969B3509 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				651C15DF7B8D47C401DD2135 /* config.example.json */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		CD15469E87EA9E1E85EE5CF5 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				E2BC1C28D8F13B10FC52AC7A /* ShelfCore */,
 				2EF3553876C623C95B57E5F5 /* ShelfMacApp */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		E2BC1C28D8F13B10FC52AC7A /* ShelfCore */ = {
+			isa = PBXGroup;
+			children = (
+				1A3B5E876D50A31BEBCBD351 /* Tools */,
+			);
+			path = ShelfCore;
+			sourceTree = "<group>";
+		};
 		F98F003EE2747A05DCC0CF21 = {
 			isa = PBXGroup;
 			children = (
+				CAB15F29C2C17C26969B3509 /* Config */,
 				AC1DA195D6463FE432930E9E /* Packages */,
+				8C264FF1FCEC064A8A4E83D7 /* Resources */,
 				CD15469E87EA9E1E85EE5CF5 /* Sources */,
 				314DFE6D19B0C52A39AD37A6 /* Products */,
 			);
@@ -78,6 +177,7 @@
 			buildConfigurationList = 3510F916107ECADD0A7FD9C2 /* Build configuration list for PBXNativeTarget "Shelf" */;
 			buildPhases = (
 				E647543DFA06B802A295C593 /* Sources */,
+				8A06BDA5BCF566E678D73B1D /* Resources */,
 				875010B4727E585F35DBF312 /* Frameworks */,
 			);
 			buildRules = (
@@ -124,6 +224,33 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8A06BDA5BCF566E678D73B1D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */,
+				DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */,
+				CA04118D7DFF0280FFF26873 /* app.js in Resources */,
+				2CEECEF5579850629BE85585 /* apple_books.py in Resources */,
+				5F0B527A57CBABFAF1644923 /* bookshelf.py in Resources */,
+				4B615E82AC373201608C95C9 /* boox_rotation.py in Resources */,
+				78E3C712135EF62800ED0B25 /* boox_settings.py in Resources */,
+				0C635D4432F5139126A71EA0 /* calibre_fts.py in Resources */,
+				13E36FA69283CDE12CBBBBF5 /* config.example.json in Resources */,
+				ED671E2BE235BDD21A18A8D0 /* index.html in Resources */,
+				ED741A475C850F11E42A559E /* kosync_calibre_bridge.py in Resources */,
+				20289FFE617A574C82A2556E /* open_library_book.py in Resources */,
+				169E70579C1BB94E8C32806F /* reader_book.py in Resources */,
+				1A9CAB3A150EEE451B9573A9 /* readwise_reader_sync.py in Resources */,
+				5689FF5507B438A705170C38 /* shelf_book_actions.py in Resources */,
+				78D22BA7AE6DC22342A3A2BA /* shelf_config.py in Resources */,
+				49A0629B6694AFE1DEDAD4C6 /* style.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E647543DFA06B802A295C593 /* Sources */ = {
@@ -262,7 +389,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 35;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -275,7 +402,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.14;
+				MARKETING_VERSION = 0.1.34;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
@@ -289,7 +416,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 35;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -302,7 +429,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.14;
+				MARKETING_VERSION = 0.1.34;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;

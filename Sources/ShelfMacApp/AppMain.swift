@@ -3,9 +3,8 @@ import CryptoKit
 import ImageIO
 import Foundation
 import UniformTypeIdentifiers
-import Security
-import LocalAuthentication
 import WebKit
+import SQLite3
 import ShelfCore
 
 private final class WeakScriptMessageHandler:NSObject, WKScriptMessageHandler {
@@ -126,13 +125,13 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerProgressSlider:NSSlider?
     private var readerProgressLabel:NSTextField?
     private var readerSettingsPopover:NSPopover?
+    private let coverSourceLock=NSLock()
+    private var coverSources:[Int:[String:Any]] = [:]
     private var readerChapters:[[String:Any]]=[]
     private var readerFontSize:Double=19
     private var readerFontChoice="sans"
     private var readerIsJapanese=false
-    private let keychainCacheLock=NSLock()
-    private var keychainCredentialCache=[String:String]()
-    private var keychainCredentialLookups=Set<String>()
+    private let credentialStoreLock=NSLock()
     private var loadingLabel: NSTextField!
     private var updates: [String: Any] = ["calibreInstalled":"9.16", "calibreLatest":"Not checked", "crossPointInstalled":"1.6.0", "crossPointLatest":"Not checked", "checkedAt":NSNull()]
     private let uid = String(getuid())
@@ -144,6 +143,25 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var scriptsPath: String { configuration.path("scripts", fallback: "\(base)/scripts") }
     private var logsPath: String { configuration.path("logs", fallback: "\(base)/logs") }
     private var importPath: String { configuration.path("import", fallback: "\(home)/Books/Calibre Import") }
+    private var pythonExecutable: String {
+        let architecture = Self.run("/usr/bin/uname", ["-m"]).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let runtimeArch = architecture == "arm64" ? "arm64" : "x86_64"
+        if let resources = Bundle.main.resourceURL {
+            let bundled = resources.appendingPathComponent("PythonRuntime/\(runtimeArch)/python/bin/python3").path
+            if FileManager.default.isExecutableFile(atPath: bundled) { return bundled }
+        }
+        // Source builds may use an already-installed interpreter. Never invoke
+        // Apple's command-line-tools stub on a user installation; it can open
+        // an Xcode/Command Line Tools installation prompt.
+        for candidate in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/Library/Developer/CommandLineTools/usr/bin/python3", "/Applications/Xcode.app/Contents/Developer/usr/bin/python3"] {
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return "/usr/bin/false"
+    }
+    private var detectedLibraryPath: String? {
+        [libraryPath, "\(home)/Books/Calibre Library", "\(home)/Documents/Calibre Library", "\(home)/Calibre Library"]
+            .first { FileManager.default.fileExists(atPath: URL(fileURLWithPath: $0).appendingPathComponent("metadata.db").path) }
+    }
     private var projectPath: String { configuration.path("project", fallback: "~/Shelf") }
     private var bridgeScriptPath: String { configuration.path("bridgeScript", fallback: Bundle.main.resourceURL?.appendingPathComponent("kosync_calibre_bridge.py").path ?? "\(projectPath)/kosync_calibre_bridge.py") }
     private var username: String { configuration.value("account.username", fallback: "reader") }
@@ -165,68 +183,52 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return found.isEmpty ? fallback : found
     }
 
-    private func keychainCredential(_ key: String,allowInteraction:Bool=false) -> String? {
-        keychainCacheLock.lock()
-        defer { keychainCacheLock.unlock() }
-        if keychainCredentialLookups.contains(key) { return keychainCredentialCache[key] }
-        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: "app.shelf.dashboard",
-                                    kSecAttrAccount as String: key,
-                                    kSecReturnData as String: true,
-                                    kSecMatchLimit as String: kSecMatchLimitOne]
-        let authenticationContext=LAContext()
-        authenticationContext.interactionNotAllowed = !allowInteraction
-        query[kSecUseAuthenticationContext as String]=authenticationContext
-        var result: CFTypeRef?
-        let status=SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,let data=result as? Data,let value=String(data:data,encoding:.utf8) else {
-            if status == errSecItemNotFound { keychainCredentialLookups.insert(key) }
-            return nil
-        }
-        keychainCredentialLookups.insert(key)
-        keychainCredentialCache[key]=value
-        return value
+    private var credentialStorePath:String { "\(home)/Library/Application Support/Shelf/credentials.json" }
+
+    private func storedCredentials()->[String:String] {
+        guard let data=try? Data(contentsOf:URL(fileURLWithPath:credentialStorePath)),
+              let values=try? JSONSerialization.jsonObject(with:data) as? [String:String] else { return [:] }
+        return values
     }
 
-    @discardableResult
-    private func saveKeychainCredential(_ key: String, value: String) -> Bool {
-        keychainCacheLock.lock()
-        defer { keychainCacheLock.unlock() }
-        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key]
-        let data = Data(value.utf8)
-        let update = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if update == errSecSuccess {
-            keychainCredentialCache[key]=value
-            keychainCredentialLookups.insert(key)
+    private func localCredential(_ key:String)->String? {
+        credentialStoreLock.lock(); defer { credentialStoreLock.unlock() }
+        let fileValue=storedCredentials()[key]?.trimmingCharacters(in:.whitespacesAndNewlines)
+        if let fileValue,!fileValue.isEmpty { return fileValue }
+        if key == "calibre-server-password" {
+            let legacy=(try? String(contentsOfFile:"\(statePath)/calibre-server-password",encoding:.utf8))?.trimmingCharacters(in:.whitespacesAndNewlines)
+            return legacy?.isEmpty == false ? legacy : nil
+        }
+        return nil
+    }
+
+    private func writePrivateFile(_ data:Data,to path:String)->Bool {
+        let url=URL(fileURLWithPath:path),directory=url.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:directory.path)
+            try data.write(to:url,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
             return true
-        }
-        var add = identity
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let saved=SecItemAdd(add as CFDictionary, nil) == errSecSuccess
-        if saved {
-            keychainCredentialCache[key]=value
-            keychainCredentialLookups.insert(key)
-        }
-        return saved
+        } catch { return false }
     }
 
     @discardableResult
-    private func deleteKeychainCredential(_ key: String) -> Bool {
-        keychainCacheLock.lock()
-        defer { keychainCacheLock.unlock() }
-        let identity: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "app.shelf.dashboard",
-                                       kSecAttrAccount as String: key]
-        let status = SecItemDelete(identity as CFDictionary)
-        let deleted=status == errSecSuccess || status == errSecItemNotFound
-        if deleted {
-            keychainCredentialCache.removeValue(forKey:key)
-            keychainCredentialLookups.insert(key)
-        }
-        return deleted
+    private func saveLocalCredential(_ key:String,value:String)->Bool {
+        credentialStoreLock.lock(); defer { credentialStoreLock.unlock() }
+        var values=storedCredentials(); values[key]=value
+        guard JSONSerialization.isValidJSONObject(values),
+              let data=try? JSONSerialization.data(withJSONObject:values,options:[.sortedKeys]) else { return false }
+        return writePrivateFile(data,to:credentialStorePath)
+    }
+
+    @discardableResult
+    private func deleteLocalCredential(_ key:String)->Bool {
+        credentialStoreLock.lock(); defer { credentialStoreLock.unlock() }
+        var values=storedCredentials(); values.removeValue(forKey:key)
+        guard JSONSerialization.isValidJSONObject(values),
+              let data=try? JSONSerialization.data(withJSONObject:values,options:[.sortedKeys]) else { return false }
+        return writePrivateFile(data,to:credentialStorePath)
     }
 
     static func main() {
@@ -255,7 +257,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         webView.navigationDelegate=self
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1240,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title = "Shelf"
-        window.appearance = NSAppearance(named:.aqua)
+        // A nil appearance follows the user's macOS light/dark setting.
         // Allow practical Split View sizing so native edge snapping works on
         // MacBook screens without forcing the dashboard above half-screen width.
         window.minSize = NSSize(width:720,height:520)
@@ -335,8 +337,18 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard let body=message.body as? [String:Any], let type=body["type"] as? String else { return }
         switch type {
         case "loadSetup": loadSetup()
+        case "autoSetup": autoSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
         case "chooseSetupFolder": chooseSetupFolder(body["role"] as? String ?? "library")
+        case "appearance":
+            let mode=(body["mode"] as? String) == "bright" ? "bright" : "oled"
+            let resolved=(body["resolved"] as? String) == "light" ? "light" : "dark"
+            UserDefaults.standard.set(mode,forKey:"shelfAppearance")
+            UserDefaults.standard.set(resolved,forKey:"shelfResolvedAppearance")
+            if (UserDefaults.standard.string(forKey:"readerTheme") ?? "auto") == "auto" {
+                if var reader=activeReader { reader["appearance"]=resolved; activeReader=reader }
+                applyReaderPreferences()
+            }
         case "refresh": refresh()
         case "checkUpdates": checkUpdates()
         case "checkAll": checkAll()
@@ -348,9 +360,28 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "saveReadwiseReaderToken": saveReadwiseReaderToken(body["token"] as? String ?? "")
         case "disconnectReadwiseReader": disconnectReadwiseReader()
         case "syncReadwiseReader": syncReadwiseReader()
-        case "openBookPlayer": if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") { NSWorkspace.shared.open(url) }
+        case "openBookPlayer":
+            if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") {
+                NSWorkspace.shared.open(url)
+            } else {
+                notify("BookPlayer runs on your iPhone. Its synced reading status appears here when Hardcover is connected.")
+            }
         case "loadBooks": loadBooks()
+        case "calibreFullText": runCalibreFullText(body["action"] as? String ?? "status", query: body["query"] as? String ?? "")
+        case "loadBookCover": if let bookId=body["bookId"] as? Int { loadBookCover(bookId) }
+        case "loadAppleBooks": loadAppleBooks()
+        case "importAppleBooksCatalog": importAppleBooksCatalog()
+        case "openAppleBooks":
+            let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.iBooksX") ?? URL(fileURLWithPath:"/System/Applications/Books.app")
+            NSWorkspace.shared.open(url)
+        case "openFullDiskAccessSettings":
+            if let url=URL(string:"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
         case "openBook": if let bookId=body["bookId"] as? Int { openBook(bookId) }
+        case "openLibraryBook": if let bookId=body["bookId"] as? Int { openLibraryBook(bookId) }
+        case "setBookFinished":
+            if let bookId=body["bookId"] as? Int {
+                setBookFinished(bookId, finished: body["finished"] as? Bool ?? true)
+            }
         case "chooseEPUBImport": chooseEPUBImports()
         case "saveProgressMatch": if let document=body["document"] as? String, let bookId=body["bookId"] as? Int { saveProgressMatch(document,bookId:bookId) }
         case "loadDiscovery": loadDiscovery(body["period"] as? String ?? "weekly")
@@ -373,6 +404,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let crosspoint=(services["crosspointApi"] as? String).flatMap{$0.isEmpty ? nil : $0} ?? "http://127.0.0.1:17303"
         send("setupLoaded", [
             "setupCompleted":configuration.bool("setupCompleted"),
+            "libraryDetected": detectedLibraryPath != nil,
+            "detectedLibraryPath": detectedLibraryPath ?? "",
             "cloudProvider":configuration.value("cloudProvider",fallback:"icloud"),
             "libraryPath":libraryPath,"importPath":importPath,"username":username,
             "devices":configuration.strings("devices"),
@@ -382,6 +415,29 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             "kosyncUrl":sync,
             "crosspointUrl":crosspoint
         ])
+    }
+
+    /// Finish the common first-run path with local defaults; optional services can be linked later.
+    private func autoSetup() {
+        guard let detected = detectedLibraryPath else {
+            send("setupAutoResult", ["ok": false, "message": "Shelf couldn’t find a Calibre library. Choose the folder containing metadata.db, then use Finish setup."])
+            return
+        }
+        do {
+            let incoming = URL(fileURLWithPath: importPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
+            try configuration.set("paths.library", detected)
+            try configuration.set("paths.import", incoming.path)
+            try configuration.set("setupCompleted", true)
+            if configuration.value("account.username", fallback: "").isEmpty {
+                try configuration.set("account.username", "reader")
+            }
+            send("setupAutoResult", ["ok": true, "message": "Setup finished. Shelf found your Calibre library and prepared an incoming-books folder. You can connect optional services later."])
+            loadSetup()
+            refresh()
+        } catch {
+            send("setupAutoResult", ["ok": false, "message": "Shelf couldn’t finish setup: \(error.localizedDescription)"])
+        }
     }
 
     private func saveSetup(_ form:[String:Any]) {
@@ -407,11 +463,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             try configuration.set("services.kosyncHealth",sync.isEmpty ? "" : "\(sync)/healthcheck")
             try configuration.set("services.crosspointApi",crosspoint)
             try configuration.set("services.crosspointHealth",crosspoint.isEmpty ? "" : "\(crosspoint)/healthz")
-            if let password=form["calibrePassword"] as? String,!password.isEmpty,!saveKeychainCredential("calibre-server-password",value:password) {
-                throw NSError(domain:"ShelfSetup",code:1,userInfo:[NSLocalizedDescriptionKey:"Could not save the Calibre password to Keychain."])
+            if let password=form["calibrePassword"] as? String,!password.isEmpty,
+               (!saveLocalCredential("calibre-server-password",value:password) || !writePrivateFile(Data((password+"\n").utf8),to:"\(statePath)/calibre-server-password")) {
+                throw NSError(domain:"ShelfSetup",code:1,userInfo:[NSLocalizedDescriptionKey:"Could not save the Calibre password to Shelf’s private local credential file."])
             }
-            if let key=form["syncApiKey"] as? String,!key.isEmpty,!saveKeychainCredential("sync-api-key",value:key) {
-                throw NSError(domain:"ShelfSetup",code:2,userInfo:[NSLocalizedDescriptionKey:"Could not save the sync API key to Keychain."])
+            if let key=form["syncApiKey"] as? String,!key.isEmpty,!saveLocalCredential("sync-api-key",value:key) {
+                throw NSError(domain:"ShelfSetup",code:2,userInfo:[NSLocalizedDescriptionKey:"Could not save the sync API key to Shelf’s private local credential file."])
             }
             try configuration.set("setupCompleted",true)
             send("setupSaved",["ok":true])
@@ -455,12 +512,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         appMenu.addItem(withTitle:"Quit Dashboard",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let view=NSMenuItem(); view.title="Dashboard"; menu.addItem(view)
         let viewMenu=NSMenu(); view.submenu=viewMenu
-        let refreshItem=NSMenuItem(title:"Refresh status",action:#selector(menuRefresh),keyEquivalent:"r"); refreshItem.target=self; viewMenu.addItem(refreshItem)
         let updateItem=NSMenuItem(title:"Check for updates",action:#selector(menuUpdate),keyEquivalent:"u"); updateItem.target=self; updateItem.keyEquivalentModifierMask=[.command,.shift]; viewMenu.addItem(updateItem)
         NSApp.mainMenu=menu
     }
 
-    @objc private func menuRefresh() { refresh() }
     @objc private func menuUpdate() { checkUpdates() }
 
     private func refresh() {
@@ -480,20 +535,203 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let script=Bundle.main.resourceURL?.appendingPathComponent("bookshelf.py").path ?? "\(home)/Shelf/bookshelf.py"
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script])
+            let result=Self.run(self.pythonExecutable,[script])
             guard result.code == 0,
                   let bytes=result.output.data(using:.utf8),
                   var payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any] else {
                 DispatchQueue.main.async { self.send("bookshelfError",["message":"Could not read the local Calibre library: \(result.output.trimmingCharacters(in:.whitespacesAndNewlines).suffix(240))"]) }
                 return
             }
-            let reading=(payload["reading"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            let recent=(payload["recent"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            let allBooks=(payload["allBooks"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            payload["reading"]=reading
-            payload["recent"]=recent
+            // Keep the WebKit bridge payload compact. Covers are fetched on
+            // demand for visible cards instead of embedding them in the entire
+            // catalog response.
+            let allBooks=(payload["allBooks"] as? [[String:Any]] ?? []).sorted {
+                (($0["title"] as? String) ?? "").localizedStandardCompare(($1["title"] as? String) ?? "") == .orderedAscending
+            }
             payload["allBooks"]=allBooks
+            self.coverSourceLock.lock()
+            self.coverSources=Dictionary(uniqueKeysWithValues:allBooks.compactMap { book in
+                guard let id=book["id"] as? Int else { return nil }
+                return (id,book)
+            })
+            self.coverSourceLock.unlock()
             DispatchQueue.main.async { self.send("bookshelfData",payload) }
+        }
+    }
+
+    private func runCalibreFullText(_ action: String, query: String) {
+        guard ["status", "enable", "disable", "search"].contains(action) else { return }
+        guard action != "search" || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            send("fullTextResult", ["ok": false, "message": "Enter words to search for."])
+            return
+        }
+        let script = Bundle.main.resourceURL?.appendingPathComponent("calibre_fts.py").path ?? "\(projectPath)/calibre_fts.py"
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let result = Self.run(self.pythonExecutable, [script, action] + (action == "search" ? [query] : []))
+            let payload = result.output.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                ?? ["ok": false, "message": String(result.output.suffix(1200))]
+            DispatchQueue.main.async { self.send("fullTextResult", payload) }
+        }
+    }
+
+    private func loadBookCover(_ bookId:Int) {
+        coverSourceLock.lock(); let source=coverSources[bookId]; coverSourceLock.unlock()
+        guard let source else { send("bookCoverLoaded",["bookId":bookId,"coverData":NSNull()]); return }
+        let covered=withCover(source)
+        send("bookCoverLoaded",["bookId":bookId,"coverData":covered["coverData"] ?? NSNull()])
+    }
+
+    private func loadAppleBooks() {
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let payload=self.readAppleBooksDatabase()
+            DispatchQueue.main.async { self.send("appleBooksData",payload) }
+        }
+    }
+
+    private func readAppleBooksDatabase() -> [String:Any] {
+        let roots=[
+            "Library/Containers/com.apple.iBooksX/Data/Documents",
+            "Library/Containers/com.apple.BKAgentService/Data/Documents",
+            "Library/Group Containers/group.com.apple.iBooks",
+            "Library/Group Containers/group.com.apple.BKAgentService"
+        ].map { URL(fileURLWithPath:home).appendingPathComponent($0,isDirectory:true) }
+        var denied=false,databases=[URL]()
+        for root in roots {
+            var isDirectory:ObjCBool=false
+            guard FileManager.default.fileExists(atPath:root.path,isDirectory:&isDirectory),isDirectory.boolValue else { continue }
+            guard let enumerator=FileManager.default.enumerator(at:root,includingPropertiesForKeys:[.isRegularFileKey],options:[],errorHandler:{ _,error in
+                if (error as NSError).code == NSFileReadNoPermissionError || (error as NSError).code == Int(EPERM) { denied=true }
+                return true
+            }) else { continue }
+            for case let url as URL in enumerator {
+                let filename=url.lastPathComponent
+                if filename.hasPrefix("BKLibrary"),["sqlite","sqlite3"].contains(url.pathExtension.lowercased()) { databases.append(url) }
+            }
+        }
+        for url in databases.sorted(by:{$0.path<$1.path}) {
+            var db:OpaquePointer?
+            guard sqlite3_open_v2(url.path,&db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,nil) == SQLITE_OK,let db else {
+                if let db { sqlite3_close(db) }; continue
+            }
+            defer { sqlite3_close(db) }
+            var tableQuery:OpaquePointer?
+            var tables=Set<String>()
+            if sqlite3_prepare_v2(db,"SELECT name FROM sqlite_master WHERE type='table'",-1,&tableQuery,nil) == SQLITE_OK,let tableQuery {
+                while sqlite3_step(tableQuery) == SQLITE_ROW { if let name=sqlite3_column_text(tableQuery,0) { tables.insert(String(cString:name)) } }
+                sqlite3_finalize(tableQuery)
+            }
+            guard tables.contains("ZBKLIBRARYASSET") else { continue }
+            var columnQuery:OpaquePointer?
+            var columns=Set<String>()
+            if sqlite3_prepare_v2(db,"PRAGMA table_info('ZBKLIBRARYASSET')",-1,&columnQuery,nil) == SQLITE_OK,let columnQuery {
+                while sqlite3_step(columnQuery) == SQLITE_ROW { if let name=sqlite3_column_text(columnQuery,1) { columns.insert(String(cString:name).uppercased()) } }
+                sqlite3_finalize(columnQuery)
+            }
+            let mapping:[(String,String)]=[("title","ZTITLE"),("author","ZAUTHOR"),("progress","ZREADINGPROGRESS"),("highWater","ZHIGHWATERMARKPROGRESS"),("duration","ZDURATION"),("assetId","ZASSETID"),("guid","ZPERMANENTID"),("coverURL","ZURL"),("kind","ZKIND"),("audioFlag","ZISSTOREAUDIOBOOK"),("finished","ZISFINISHED"),("lastOpened","ZLASTOPENDATE"),("lastEngaged","ZLASTENGAGEDDATE"),("hidden","ZHIDDEN"),("sample","ZISSAMPLE"),("supplemental","ZISSUPPLEMENTAL")]
+            let available=mapping.filter{columns.contains($0.1)}
+            guard available.contains(where:{$0.0=="title"}),available.contains(where:{["progress","highWater"].contains($0.0)}) else {
+                return ["status":"unsupported_schema","books":[]]
+            }
+            let query="SELECT "+available.map{"\"\($0.1)\" AS \"\($0.0)\""}.joined(separator:",")+" FROM ZBKLIBRARYASSET"
+            var rows:OpaquePointer?
+            guard sqlite3_prepare_v2(db,query,-1,&rows,nil) == SQLITE_OK,let rows else { continue }
+            var result=[[String:Any]]()
+            func text(_ index:Int32)->String? { guard sqlite3_column_type(rows,index) != SQLITE_NULL,let value=sqlite3_column_text(rows,index) else { return nil };return String(cString:value).trimmingCharacters(in:.whitespacesAndNewlines) }
+            func number(_ index:Int32)->Double? { sqlite3_column_type(rows,index) == SQLITE_NULL ? nil : sqlite3_column_double(rows,index) }
+            let indices=Dictionary(uniqueKeysWithValues:available.enumerated().map{($0.element.0,Int32($0.offset))})
+            func value(_ key:String)->String? { indices[key].flatMap{text($0)} }
+            func date(_ key:String)->String? {
+                guard let index=indices[key],let raw=number(index),raw>0 else { return nil }
+                let seconds=raw < 500_000_000 ? raw+978_307_200 : raw
+                let formatter=ISO8601DateFormatter();formatter.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
+                return formatter.string(from:Date(timeIntervalSince1970:seconds))
+            }
+            while sqlite3_step(rows) == SQLITE_ROW {
+                guard let title=value("title"),!title.isEmpty else { continue }
+                let kind=(value("kind") ?? "").lowercased(),audio=(indices["audioFlag"].map{number($0) ?? 0 > 0} ?? false) || kind.contains("audiobook") || kind.contains("audio-book")
+                if ["hidden","sample","supplemental"].contains(where:{indices[$0].map{number($0) ?? 0 > 0} ?? false}) { continue }
+                let progressIndex=indices["progress"] ?? indices["highWater"]!
+                let progress=min(1,max(0,number(progressIndex) ?? 0))
+                let duration=indices["duration"].flatMap{number($0)}.map{Int(max(0,$0))}
+                result.append(["title":title,"author":value("author") ?? "","mediaType":audio ? "audiobook":"book","progress":progress,"duration":duration as Any? ?? NSNull(),"assetId":value("assetId") as Any? ?? NSNull(),"guid":value("guid") as Any? ?? NSNull(),"coverURL":value("coverURL") as Any? ?? NSNull(),"finished":(indices["finished"].map{number($0) ?? 0 > 0} ?? false) || progress >= 0.97,"lastOpened":date("lastOpened") as Any? ?? NSNull(),"lastEngaged":date("lastEngaged") as Any? ?? NSNull()])
+            }
+            sqlite3_finalize(rows)
+            result.sort{String(describing:$0["lastEngaged"] ?? $0["lastOpened"] ?? "") > String(describing:$1["lastEngaged"] ?? $1["lastOpened"] ?? "")}
+            return ["status":"connected","books":result]
+        }
+        return ["status":denied ? "permission_required":"not_found","books":[]]
+    }
+
+    private func importAppleBooksCatalog() {
+        notify("Reading Apple Books titles…")
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let payload=self.readAppleBooksDatabase()
+            guard payload["status"] as? String == "connected",
+                  let books=payload["books"] as? [[String:Any]] else {
+                let status=payload["status"] as? String ?? "unavailable"
+                DispatchQueue.main.async {
+                    self.notify(status == "permission_required" ? "macOS is still blocking Apple Books access for Shelf. Enable Shelf under Full Disk Access, then reopen it." : "Apple Books catalog is not available on this Mac yet.")
+                }
+                return
+            }
+            let calibre="/Applications/calibre.app/Contents/MacOS/calibredb"
+            let calibreLibrary=self.configuration.value("services.calibreCli",fallback:"http://127.0.0.1:8080/#Calibre_Library")
+            let passwordFile="<f:\(self.statePath)/calibre-server-password>"
+            var authArgs=[String]()
+            if !self.serverPassword().isEmpty { authArgs=["--username",self.username,"--password",passwordFile] }
+            let remoteList=Self.run(calibre,["--with-library",calibreLibrary]+authArgs+["list","--fields","title,authors","--for-machine"])
+            let cleanOutput=remoteList.output.components(separatedBy:.newlines).filter{ !$0.hasPrefix("NoTrans:") }.joined(separator:"\n")
+            let jsonOutput=cleanOutput.firstIndex(of:"[").flatMap { start in
+                cleanOutput[start...].lastIndex(of:"]").map { end in String(cleanOutput[start...end]) }
+            } ?? ""
+            guard remoteList.code == 0,
+                  let remoteBooks=try? JSONSerialization.jsonObject(with:Data(jsonOutput.utf8)) as? [[String:Any]] else {
+                DispatchQueue.main.async { self.notify("Could not safely read the live Calibre catalog. No Apple Books entries were added.") }
+                return
+            }
+            let existingResult=Self.run(self.pythonExecutable,[Bundle.main.resourceURL?.appendingPathComponent("bookshelf.py").path ?? ""])
+            let existingBooks=(try? JSONSerialization.jsonObject(with:Data(existingResult.output.utf8)) as? [String:Any])?["allBooks"] as? [[String:Any]] ?? []
+            func normalized(_ value:String)->String { value.folding(options:[.caseInsensitive,.diacriticInsensitive],locale:.current).split(whereSeparator:{$0.isWhitespace}).joined(separator:" ") }
+            var existing=Set(existingBooks.compactMap { book -> String? in
+                guard let title=book["title"] as? String,!title.isEmpty else { return nil }
+                return normalized(title)+"|"+normalized(book["authors"] as? String ?? "")
+            })
+            existing.formUnion(remoteBooks.compactMap { book -> String? in
+                guard let title=book["title"] as? String,!title.isEmpty else { return nil }
+                return normalized(title)+"|"+normalized(book["authors"] as? String ?? "")
+            })
+            var added=0,failed=0
+            for book in books {
+                let title=(book["title"] as? String ?? "").trimmingCharacters(in:.whitespacesAndNewlines)
+                let author=(book["author"] as? String ?? "Unknown author").trimmingCharacters(in:.whitespacesAndNewlines)
+                guard !title.isEmpty else { continue }
+                let key=normalized(title)+"|"+normalized(author)
+                if existing.contains(key) { continue }
+                let outcome=Self.run(calibre,["--with-library",calibreLibrary]+authArgs+["add","--empty","--title=\(title)","--authors=\(author)","--tags=Apple Books,External Catalog"])
+                if outcome.code == 0 { added += 1; existing.insert(key) } else { failed += 1 }
+            }
+            DispatchQueue.main.async {
+                self.notify("Apple Books catalog checked · \(added) new Calibre entries added\(failed > 0 ? " · \(failed) could not be added" : "") · existing titles were skipped. Apple Books files were not copied.")
+                self.loadBooks()
+            }
+        }
+    }
+
+    private func openLibraryBook(_ bookId:Int) {
+        guard bookId > 0, let script=Bundle.main.resourceURL?.appendingPathComponent("open_library_book.py").path else { return }
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result=Self.run(self.pythonExecutable,[script,String(bookId)])
+            guard result.code == 0,
+                  let payload=try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any],
+                  let path=payload["path"] as? String else {
+                let error=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["error"] as? String ?? "Could not locate a local book file."
+                DispatchQueue.main.async { self.notify(error) }; return
+            }
+            DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath:path)) }
         }
     }
 
@@ -517,9 +755,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         } catch { notify("Could not save the progress match: \(error.localizedDescription)"); return }
         let bridgeScript=bridgeScriptPath
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let result=Self.run("/usr/bin/python3",[bridgeScript])
+            guard let self else { return }
+            let result=Self.run(self.pythonExecutable,[bridgeScript])
             DispatchQueue.main.async {
-                guard let self else { return }
                 if result.code == 0 {
                     self.notify("Progress linked to Calibre. Refreshing your cover shelf…")
                     self.loadBooks()
@@ -536,7 +774,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let script=Bundle.main.resourceURL?.appendingPathComponent("reader_book.py").path ?? "\(home)/Shelf/reader_book.py"
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script,String(bookId)])
+            let result=Self.run(self.pythonExecutable,[script,String(bookId)])
             guard result.code == 0, let bytes=result.output.data(using:.utf8),
                   let payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any],
                   let document=payload["document"] as? String,
@@ -564,14 +802,31 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
+    private func setBookFinished(_ bookId:Int, finished:Bool) {
+        guard bookId > 0 else { return }
+        let script=Bundle.main.resourceURL?.appendingPathComponent("shelf_book_actions.py").path ?? "\(home)/Shelf/shelf_book_actions.py"
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let result=Self.run(self.pythonExecutable,[script,String(bookId),finished ? "finished" : "reading"])
+            DispatchQueue.main.async {
+                guard result.code == 0 else {
+                    self.notify("Could not update this book’s finished status.")
+                    return
+                }
+                self.notify(finished ? "Marked as finished." : "Moved back to your reading list.")
+                self.loadBooks()
+            }
+        }
+    }
+
     private func syncAuthKey() -> String {
-        if let saved=keychainCredential("sync-api-key",allowInteraction:true),!saved.isEmpty { return saved }
+        if let saved=localCredential("sync-api-key"),!saved.isEmpty { return saved }
         return Self.run(dockerPath,["exec","kosync","redis-cli","--raw","-n","1","GET","user:\(username):key"]).output.trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
     private func serverPassword() -> String {
         let file=(try? String(contentsOfFile:"\(statePath)/calibre-server-password",encoding:.utf8))?.trimmingCharacters(in:.newlines) ?? ""
-        return file.isEmpty ? (keychainCredential("calibre-server-password") ?? "") : file
+        return file.isEmpty ? (localCredential("calibre-server-password") ?? "") : file
     }
 
     private func fetchReaderProgress(_ documents:[String]) -> Double? {
@@ -617,6 +872,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             "authors":payload["authors"] ?? "",
             "filename":payload["filename"] ?? "",
             "language":payload["language"] ?? "",
+            "appearance":UserDefaults.standard.string(forKey:"shelfResolvedAppearance") ?? "dark",
             "resumePercentage":payload["resumePercentage"] ?? 0
         ]
         let language=(payload["language"] as? String ?? "").lowercased()
@@ -629,8 +885,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let savedFont=UserDefaults.standard.string(forKey:fontKey) ?? (japanese ? "serif" : "sans")
         let font=["serif","sans","system"].contains(savedFont) ? savedFont : (japanese ? "serif" : "sans")
         readerFontChoice=font
-        let savedTheme=UserDefaults.standard.string(forKey:"readerTheme") ?? "paper"
-        let theme=["light","paper","night"].contains(savedTheme) ? savedTheme : "paper"
+        let savedTheme=UserDefaults.standard.string(forKey:"readerTheme") ?? "auto"
+        let theme=["auto","light","paper","night"].contains(savedTheme) ? savedTheme : "auto"
         let savedSpacing=UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal"
         let spacing=["compact","normal","relaxed"].contains(savedSpacing) ? savedSpacing : "normal"
         if let json=try? JSONSerialization.data(withJSONObject:readerData,options:[.fragmentsAllowed,.sortedKeys]),
@@ -641,7 +897,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               const style=document.createElement('style');
               style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:88px 280px 104px;column-width:790px!important;column-gap:560px!important;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
               let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,userHasNavigated=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
-              window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd']};const palette=themes[p.theme]||themes.paper;const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
+              window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd'],oled:['#000000','#f1f1f3']};const palette=p.theme==='auto'?(p.appearance==='dark'?themes.oled:themes.paper):(themes[p.theme]||themes.paper);const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.colorScheme=p.appearance==='dark'?'dark':'light';root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
               let titleKey=(window.readerBook.title||'').trim().toLocaleLowerCase();
               const chapterEntries=[],seenChapterTargets=new Set();
               const tocLinks=Array.from(document.querySelectorAll('.p-toc a, #toc a, [role="doc-toc"] a')).concat(Array.from(document.querySelectorAll('nav')).filter(n=>/(^|\\s)toc(\\s|$)/i.test(n.getAttribute('epub:type')||n.getAttributeNS('http://www.idpf.org/2007/ops','type')||'')).flatMap(n=>Array.from(n.querySelectorAll('a'))));
@@ -654,6 +910,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               if(!chapterEntries.length){for(const target of Array.from(document.querySelectorAll('[id][title].main'))){const label=(target.getAttribute('title')||'').trim();if(label&&!seenChapterTargets.has(target)){seenChapterTargets.add(target);chapterEntries.push({element:target,title:label.replace(/\\s+/g,' ').slice(0,100)})}}}
               if(!chapterEntries.length){for(const h of Array.from(document.querySelectorAll('h1,h2,h3,h4'))){const t=(h.innerText||h.textContent||'').trim();if(t&&t.toLocaleLowerCase()!==titleKey&&!/^(contents|table of contents|copyright|title page)$/i.test(t)){chapterEntries.push({element:h,title:t.replace(/\\s+/g,' ').slice(0,100)})}}}
               if(!chapterEntries.length)chapterEntries.push({element:document.body,title:window.readerBook.title||'Book'});
+              // EPUB navigation documents can list entries out of reading order.
+              // The converted book's DOM follows its EPUB spine and is the reliable
+              // source for the chapter menu and previous/next chapter controls.
+              chapterEntries.sort((a,b)=>{const relation=a.element.compareDocumentPosition(b.element);if(relation&Node.DOCUMENT_POSITION_FOLLOWING)return -1;if(relation&Node.DOCUMENT_POSITION_PRECEDING)return 1;return 0});
               const headings=chapterEntries.map(entry=>entry.element);headings.forEach((h,i)=>{if(!h.id)h.id='reader-section-'+i});
               window.readerChapters=chapterEntries.map((entry,i)=>({title:entry.title||('Section '+(i+1)),id:entry.element.id}));
               function step(){return readerViewport?readerViewport.clientWidth:window.innerWidth}
@@ -745,7 +1005,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func showReaderAppearance(_ sender:NSButton) {
         if let shown=readerSettingsPopover,shown.isShown { shown.performClose(sender); return }
         let font=NSPopUpButton(frame:.zero,pullsDown:false); font.addItems(withTitles:["Noto Sans","Noto Serif","System"]); font.target=self; font.action=#selector(readerSelectFont(_:)); font.selectItem(at:["sans","serif","system"].firstIndex(of:readerFontChoice) ?? 0); font.widthAnchor.constraint(equalToConstant:156).isActive=true; font.controlSize = .small; readerFontMenu=font
-        let theme=NSPopUpButton(frame:.zero,pullsDown:false); theme.addItems(withTitles:["Light","Paper","Night"]); theme.target=self; theme.action=#selector(readerSelectTheme(_:)); theme.selectItem(at:["light","paper","night"].firstIndex(of:UserDefaults.standard.string(forKey:"readerTheme") ?? "paper") ?? 1); theme.widthAnchor.constraint(equalToConstant:156).isActive=true; theme.controlSize = .small; readerThemeMenu=theme
+        let theme=NSPopUpButton(frame:.zero,pullsDown:false); theme.addItems(withTitles:["Follow Shelf","Light","Paper","Night"]); theme.target=self; theme.action=#selector(readerSelectTheme(_:)); theme.selectItem(at:["auto","light","paper","night"].firstIndex(of:UserDefaults.standard.string(forKey:"readerTheme") ?? "auto") ?? 0); theme.widthAnchor.constraint(equalToConstant:156).isActive=true; theme.controlSize = .small; readerThemeMenu=theme
         let spacing=NSPopUpButton(frame:.zero,pullsDown:false); spacing.addItems(withTitles:["Compact","Normal","Relaxed"]); spacing.target=self; spacing.action=#selector(readerSelectSpacing(_:)); spacing.selectItem(at:["compact","normal","relaxed"].firstIndex(of:UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal") ?? 1); spacing.widthAnchor.constraint(equalToConstant:156).isActive=true; spacing.controlSize = .small; readerSpacingMenu=spacing
         let size=NSTextField(labelWithString:"\(Int(readerFontSize)) pt"); size.alignment = .center; size.widthAnchor.constraint(equalToConstant:46).isActive=true; readerSizeLabel=size
         let minus=NSButton(title:"−",target:self,action:#selector(readerDecreaseText)); minus.bezelStyle = .rounded; minus.controlSize = .small
@@ -767,7 +1027,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func readerPreferencePayload()->[String:Any] {
-        ["size":readerFontSize,"font":readerFontChoice,"theme":UserDefaults.standard.string(forKey:"readerTheme") ?? "paper","spacing":UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal"]
+        ["size":readerFontSize,"font":readerFontChoice,"theme":UserDefaults.standard.string(forKey:"readerTheme") ?? "auto","spacing":UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal","appearance":UserDefaults.standard.string(forKey:"shelfResolvedAppearance") ?? "dark"]
     }
 
     private func applyReaderPreferences() {
@@ -813,7 +1073,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func readerDecreaseText() { readerFontSize=max(12,readerFontSize-1); UserDefaults.standard.set(readerFontSize,forKey:"readerFontSize"); applyReaderPreferences() }
     @objc private func readerIncreaseText() { readerFontSize=min(32,readerFontSize+1); UserDefaults.standard.set(readerFontSize,forKey:"readerFontSize"); applyReaderPreferences() }
     @objc private func readerSelectFont(_ sender:NSPopUpButton) { let values=["sans","serif","system"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; readerFontChoice=values[index]; UserDefaults.standard.set(readerFontChoice,forKey:readerIsJapanese ? "readerFontFamily.ja" : "readerFontFamily.en"); applyReaderPreferences() }
-    @objc private func readerSelectTheme(_ sender:NSPopUpButton) { let values=["light","paper","night"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; UserDefaults.standard.set(values[index],forKey:"readerTheme"); applyReaderPreferences() }
+    @objc private func readerSelectTheme(_ sender:NSPopUpButton) { let values=["auto","light","paper","night"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; UserDefaults.standard.set(values[index],forKey:"readerTheme"); applyReaderPreferences() }
     @objc private func readerSelectSpacing(_ sender:NSPopUpButton) { let values=["compact","normal","relaxed"]; let index=sender.indexOfSelectedItem; guard values.indices.contains(index) else { return }; UserDefaults.standard.set(values[index],forKey:"readerSpacing"); applyReaderPreferences() }
     @objc private func readerProgressChanged(_ sender:NSSlider) { readerWebView?.evaluateJavaScript("window.readerScrollTo(\(sender.doubleValue));",completionHandler:nil) }
     @objc private func closeReader() {
@@ -896,12 +1156,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func publishReadwiseHighlight(title:String,author:String,text:String,completion:@escaping(Bool)->Void) {
-        guard let token=keychainCredential("readwise-reader-token",allowInteraction:true),!token.isEmpty else { completion(false); return }
+        guard let token=localCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
         let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
         DispatchQueue.global(qos:.utility).async {
-            let result=Self.run("/usr/bin/python3",[helper],input:json)
+            let result=Self.run(self.pythonExecutable,[helper],input:json)
             let ok=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["ok"] as? Bool == true
             completion(ok)
         }
@@ -917,26 +1177,26 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         notify("Checking the Readwise access token…")
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let result=Self.run("/usr/bin/python3",[helper],input:json)
+            guard let self else { return }
+            let result=Self.run(self.pythonExecutable,[helper],input:json)
             let response=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8))) as? [String:Any] ?? [:]
             DispatchQueue.main.async {
-                guard let self else { return }
                 guard result.code == 0, response["ok"] as? Bool == true else {
                     self.notify(response["error"] as? String ?? "Readwise could not validate this token."); return
                 }
-                guard self.saveKeychainCredential("readwise-reader-token",value:token) else {
-                    self.notify("Could not save the validated token to macOS Keychain."); return
+                guard self.saveLocalCredential("readwise-reader-token",value:token) else {
+                    self.notify("Could not save the validated token to Shelf’s private local credential file."); return
                 }
                 self.send("readwiseTokenSaved",["connected":true])
-                self.notify("Readwise access token verified and saved to macOS Keychain.")
+                self.notify("Readwise access token verified and saved locally on this Mac.")
                 self.refresh()
             }
         }
     }
 
     private func disconnectReadwiseReader() {
-        guard deleteKeychainCredential("readwise-reader-token") else {
-            notify("Could not remove the Readwise connection from macOS Keychain."); return
+        guard deleteLocalCredential("readwise-reader-token") else {
+            notify("Could not remove the local Readwise connection."); return
         }
         notify("Readwise Reader disconnected. Saved local highlights remain in Shelf.")
         refresh()
@@ -944,11 +1204,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func syncReadwiseReader() {
         let token:String
-        if let saved=keychainCredential("readwise-reader-token",allowInteraction:true),!saved.isEmpty { token=saved }
+        if let saved=localCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
         else {
             let alert=NSAlert()
             alert.messageText="Connect Readwise Reader"
-            alert.informativeText="Paste your Readwise access token. Shelf stores it in macOS Keychain and uses it to sync Reader progress and highlights with matching local EPUBs."
+            alert.informativeText="Paste your Readwise access token. Shelf stores it in a private local file on this Mac and uses it to sync Reader progress and highlights with matching local EPUBs."
             let field=NSSecureTextField(frame:NSRect(x:0,y:0,width:310,height:24))
             field.placeholderString="Readwise access token"
             alert.accessoryView=field
@@ -956,8 +1216,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             alert.addButton(withTitle:"Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             token=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-            guard !token.isEmpty,saveKeychainCredential("readwise-reader-token",value:token) else {
-                notify("Could not save the Readwise token to macOS Keychain."); return
+                guard !token.isEmpty,saveLocalCredential("readwise-reader-token",value:token) else {
+                notify("Could not save the Readwise token to Shelf’s private local credential file."); return
             }
         }
         guard let syncKey=Optional(syncAuthKey()),!syncKey.isEmpty else { notify("KOReader Sync credentials are unavailable."); return }
@@ -969,7 +1229,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         notify("Syncing Readwise Reader with matching Calibre books…")
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script],input:json)
+            let result=Self.run(self.pythonExecutable,[script],input:json)
             guard let outputData=result.output.data(using:.utf8),
                   let response=try? JSONSerialization.jsonObject(with:outputData) as? [String:Any],
                   response["ok"] as? Bool == true else {
@@ -990,7 +1250,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let matched=(response["matched"] as? Int) ?? 0
             let savedHighlights=remote.values.reduce(0){$0+$1.count}
             let failures=(response["syncFailures"] as? Int) ?? 0
-            if pushed>0 { _=Self.run("/usr/bin/python3",[self.bridgeScriptPath]) }
+            if pushed>0 { _=Self.run(self.pythonExecutable,[self.bridgeScriptPath]) }
             DispatchQueue.main.async {
                 self.loadBooks()
                 if let active=self.activeReader,let bookId=(active["bookId"] as? NSNumber)?.intValue,
@@ -1256,7 +1516,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let pid=agent?.pid
             let since=pid.map(processUptime)
             let mod=logPath.flatMap(fileModified)
-            let lastLine=logPath.flatMap { tail($0,lines:1).last } ?? ""
+            let runLines=logPath.map { tail($0,lines:240) } ?? []
+            let lastLine=runLines.last ?? ""
+            let recoveredAt=logPath.flatMap { latestSuccessfulRun(in:runLines,logPath:$0) }
+            let latestFailure=runLines.indices.reversed().first { index in
+                guard eventLevel(runLines[index]) == "Error" else { return false }
+                guard let date=eventDate(at:index,in:runLines,fallback:mod) else { return true }
+                if Date().timeIntervalSince(date) > 7*86400 { return false }
+                return recoveredAt.map { $0 <= date } ?? true
+            }
+            let effectiveLastExit=(recoveredAt != nil && latestFailure == nil) ? 0 : (agent?.lastExit ?? 0)
             var state="scheduled", summary="Scheduled task waiting for its next interval", code: String?
             var measuredUptime=since ?? "Not running"
             if category == "Service" {
@@ -1276,9 +1545,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             } else {
                 let maxAge=(interval ?? 3600)*2.2+180
                 let age=mod.map { Date().timeIntervalSince($0) }
-                let errorLine = !reportsNoIssues(lastLine) && lastLine.range(of:#"error|failed|failure|denied|exception"#,options:.regularExpression.union(.caseInsensitive)) != nil
+                let errorLine = latestFailure != nil
                 if let age, age < maxAge {
-                    state=(errorLine || (agent?.lastExit ?? 0) != 0) ? "warning" : "healthy"
+                    state=(errorLine || effectiveLastExit != 0) ? "warning" : "healthy"
                 }
                 else if agent?.pid == nil && agent?.lastExit == nil {
                     state="scheduled"
@@ -1291,7 +1560,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 else if mod == nil { state="warning" }
                 else { state="stale" }
                 if !(state == "healthy" && (age == nil || (age ?? 0) >= maxAge)) {
-                    summary=lastLine.isEmpty ? "No log activity recorded" : redact(lastLine)
+                    summary=lastLine.isEmpty ? "No log activity recorded" : humanLogSummary(lastLine)
                 }
                 if id == "bridge", lastLine.contains("BRIDGE END") {
                     let documents=Int(Self.capture(#"documents=(\d+)"#,lastLine) ?? "0") ?? 0
@@ -1309,7 +1578,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 "icon":icon,"endpoint":endpoint ?? "","uptime":measuredUptime,
                 "lastActivity":mod.map(relative) ?? "No log yet",
                 "interval":interval.map(formatInterval) ?? "Continuous",
-                "lastExit":agent?.lastExit.map(String.init) ?? "—","logPath":logPath ?? "","action":action ?? ""
+                "lastExit":agent?.lastExit == nil ? "—" : String(effectiveLastExit),"logPath":logPath ?? "","action":action ?? ""
             ]
             items.append(row)
         }
@@ -1320,15 +1589,21 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             ("Malware guard","\(logDir)/calibre-malware-guard.log"),("Xteink","\(logDir)/xteink-sync-configurator.log")
         ]
         var events=[[String:Any]]()
+        let installedAt=fileModified(Bundle.main.bundleURL.path) ?? .distantPast
         for (source,path) in sources {
             let modified=fileModified(path)
-            for line in tail(path,lines:120) {
+            let lines=tail(path,lines:240)
+            let recoveredAt=latestSuccessfulRun(in:lines,logPath:path)
+            for index in max(0,lines.count-120)..<lines.count {
+                let line=lines[index]
                 let level=eventLevel(line)
                 guard level != nil else { continue }
-                let stamped=eventDate(line)
-                let eventTime=stamped ?? modified
-                guard let eventTime, Date().timeIntervalSince(eventTime) < (stamped == nil ? 86400 : 172800) else { continue }
-                events.append(["source":source,"level":level!,"message":redact(line),"date":iso(eventTime)])
+                let eventTime=eventDate(at:index,in:lines,fallback:modified)
+                guard let eventTime, Date().timeIntervalSince(eventTime) < 172800 else { continue }
+                if isResolvedBeforeThisBuild(line,eventTime,installedAt:installedAt) { continue }
+                if let recoveredAt,recoveredAt > eventTime,
+                   !line.localizedCaseInsensitiveContains("UNMATCHED") { continue }
+                events.append(["source":source,"level":level!,"message":humanLogSummary(line),"date":iso(eventTime)])
             }
         }
         var compacted=[String:[String:Any]]()
@@ -1355,7 +1630,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let shared=(md5(pass) == (plugin["progress_sync_password"] as? String ?? "") && md5(pass) == redis)
         let readerOPDS=service("readerOpds",fallback:"http://\(ip):8080/opds")
         let readerSync=service("readerSync",fallback:"http://\(ip):17200")
-        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(keychainCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
+        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"syncActivity":readSyncActivity(),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(localCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
     }
 
     private func confirmAndRun(_ id:String) {
@@ -1395,7 +1670,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "restart-kosync":return (dockerPath,["restart",configuration.value("containers.kosync",fallback:"kosync")],"KOReader Sync restart")
         case "restart-crosspoint":return (dockerPath,["restart",configuration.value("containers.crosspoint",fallback:"crosspoint-sync")],"CrossPoint Sync restart")
         case "run-import":return (launch,["kickstart","-k","\(domain)/\(agent("importer",fallback:"app.shelf.calibre-importer"))"],"E-book import")
-        case "run-bridge":return ("/usr/bin/python3",[bridgeScriptPath],"Reading-progress bridge")
+        case "run-bridge":return (pythonExecutable,[bridgeScriptPath],"Reading-progress bridge")
         case "backup-now":return ("/bin/bash",["\(scriptsPath)/calibre-restic-backup.sh"],"Library backup")
         case "run-japanese-audit":return (launch,["kickstart","-k","\(domain)/\(agent("japanese",fallback:"app.shelf.japanese-audit"))"],"Japanese EPUB audit")
         case "run-full-scan":return ("/bin/bash",["\(scriptsPath)/calibre-malware-full-scan.sh"],"Full-library safety scan")
@@ -1613,7 +1888,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let json=try JSONSerialization.data(withJSONObject:values)
         guard let input=String(data:json,encoding:.utf8) else { throw NSError(domain:"BooxSettings",code:1,userInfo:[NSLocalizedDescriptionKey:"Could not encode setup values."]) }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
-        let merged=Self.run("/usr/bin/python3",[helper,source.path,output.path],input:input)
+        let merged=Self.run(self.pythonExecutable,[helper,source.path,output.path],input:input)
         guard merged.code == 0 else { try? fm.removeItem(at:root); throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
         // KOReader stores the active plugin files in settings/, but its older
         // monolithic reader configuration lives beside that directory.
@@ -1676,7 +1951,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let values=try booxSettingsValues()
         guard let json=String(data:try JSONSerialization.data(withJSONObject:values),encoding:.utf8) else { throw NSError(domain:"BooxSettings",code:8,userInfo:[NSLocalizedDescriptionKey:"Could not encode settings."]) }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
-        let merged=Self.run("/usr/bin/python3",[helper,existing.path,output.path],input:json)
+        let merged=Self.run(self.pythonExecutable,[helper,existing.path,output.path],input:json)
         guard merged.code == 0 else { throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
         let stamp=ISO8601DateFormatter().string(from:Date()).replacingOccurrences(of:":",with:"-")
         let backup="\(settingsPath)/.calibre-stack-backup-\(stamp)"
@@ -1720,7 +1995,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
         }
         let rotationHelper=Bundle.main.resourceURL?.appendingPathComponent("boox_rotation.py").path ?? "\(home)/Shelf/boox_rotation.py"
-        let rotation=Self.run("/usr/bin/python3",[rotationHelper,adb,serial])
+        let rotation=Self.run(self.pythonExecutable,[rotationHelper,adb,serial])
         guard rotation.code == 0 else {
             throw NSError(domain:"BooxSettings",code:14,userInfo:[NSLocalizedDescriptionKey:"Calibre OPDS and KOReader Sync were transferred successfully, but automatic rotation could not be enabled: \(rotation.output.trimmingCharacters(in:.whitespacesAndNewlines).suffix(220))"])
         }
@@ -1782,7 +2057,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         try stateData.write(to:root.appendingPathComponent("dashboard-state.json"),options:.atomic)
         let environment="""
         Shelf diagnostic export
-        Created: \(ISO8601DateFormatter().string(from:Date()))
+        Created: \(DateFormatter.localizedString(from:Date(),dateStyle:.medium,timeStyle:.medium)) (\(TimeZone.current.identifier))
         macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Architecture: \(Self.run("/usr/bin/uname",["-m"]).output.trimmingCharacters(in:.whitespacesAndNewlines))
         Hostname: \(Host.current().localizedName ?? "unknown")
@@ -1800,16 +2075,19 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let logFiles=(try? fm.contentsOfDirectory(at:logDirectory,includingPropertiesForKeys:nil))?.filter { $0.pathExtension.caseInsensitiveCompare("log") == .orderedSame }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending } ?? []
         let matcher=try NSRegularExpression(pattern:#"(?i)\b(error|failed|failure|fatal|exception|traceback|interruptederror|permission denied|operation not permitted)\b|already running"#)
         var uniqueIssues=[String:(message:String,count:Int,latest:Date)]()
-        let now=Date(),cutoff=now.addingTimeInterval(-7*86400)
+        let now=Date(),cutoff=now.addingTimeInterval(-7*86400),installedAt=fileModified(Bundle.main.bundleURL.path) ?? .distantPast
         for file in logFiles {
             let fileDate=fileModified(file.path)
             let lines=tail(file.path,lines:240)
-            for line in lines {
+            let recoveredAt=latestSuccessfulRun(in:lines,logPath:file.path)
+            for (index,line) in lines.enumerated() {
                 guard !reportsNoIssues(line) else { continue }
                 if matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil {
-                    guard let issueDate=eventDate(line) ?? fileDate,
-                          issueDate >= cutoff,issueDate <= now.addingTimeInterval(300) else { continue }
-                    let summary=compactDiagnosticLine("\(file.lastPathComponent): \(line)")
+                    guard let issueDate=eventDate(at:index,in:lines,fallback:fileDate),
+                          issueDate >= cutoff,issueDate <= now.addingTimeInterval(300),
+                          !isResolvedBeforeThisBuild(line,issueDate,installedAt:installedAt) else { continue }
+                    if let recoveredAt,recoveredAt > issueDate { continue }
+                    let summary=humanLogSummary("\(file.lastPathComponent): \(line)")
                     let key=diagnosticFingerprint(summary)
                     if var issue=uniqueIssues[key] {
                         issue.count += 1
@@ -1850,7 +2128,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func send(_ function:String,_ value:[String:Any]) {
         guard JSONSerialization.isValidJSONObject(value), let data=try? JSONSerialization.data(withJSONObject:value,options:[.fragmentsAllowed]), let json=String(data:data,encoding:.utf8) else { return }
-        webView.evaluateJavaScript("window.\(function)(\(json));",completionHandler:nil)
+        webView.evaluateJavaScript("window.\(function)(\(json));") { _, error in
+            if let error { NSLog("Shelf: dashboard callback %@ failed: %@",function,error.localizedDescription) }
+        }
     }
 
     private func launchInfo(_ service:String)->(pid:Int?,lastExit:Int?) {
@@ -1925,6 +2205,91 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return nil
     }
 
+    private func readSyncActivity()->[[String:Any]] {
+        let path="\(logsPath)/kosync-calibre-bridge.log",modified=fileModified(path)
+        return tail(path,lines:600).reversed().compactMap { line in
+            guard let match=try? NSRegularExpression(pattern:#"\bSYNCED\s+book=(\d+).*?percentage=([0-9]*\.?[0-9]+).*?device=([^\r\n]+)"#),
+                  let found=match.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)),
+                  let idRange=Range(found.range(at:1),in:line),let progressRange=Range(found.range(at:2),in:line),
+                  let deviceRange=Range(found.range(at:3),in:line),let progress=Double(line[progressRange]) else { return nil }
+            let timestamp=eventDate(line) ?? modified
+            return ["bookId":Int(line[idRange]) ?? 0,"progress":min(1,max(0,progress)),"device":String(line[deviceRange]).trimmingCharacters(in:.whitespacesAndNewlines),"date":timestamp.map(iso) ?? ""]
+        }.prefix(120).map{$0}
+    }
+
+    private func humanLogSummary(_ source:String)->String {
+        let line=compactDiagnosticLine(source)
+        if let match=try? NSRegularExpression(pattern:#"\bSYNCED\s+book=\d+.*?percentage=([0-9]*\.?[0-9]+).*?device=([^\r\n]+)"#),
+           let found=match.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)),
+           let pRange=Range(found.range(at:1),in:line),let dRange=Range(found.range(at:2),in:line),let p=Double(line[pRange]) {
+            return "\(line[dRange].trimmingCharacters(in:.whitespacesAndNewlines)) saved reading progress · \(Int((min(1,max(0,p))*100).rounded()))% complete"
+        }
+        if line.localizedCaseInsensitiveContains("BACKUP END") { return "Library backup finished successfully." }
+        if line.localizedCaseInsensitiveContains("ambiguous column name: book") { return "Shelf could not read Calibre metadata. A database-query error occurred; check that Shelf has the latest update." }
+        if let docs=Self.capture(#"\bdocuments=(\d+)"#,line),let matched=Self.capture(#"\bmatched=(\d+)"#,line),line.localizedCaseInsensitiveContains("BRIDGE END") {
+            return "Reader sync finished · matched \(matched) of \(docs) progress records to Calibre."
+        }
+        return line
+    }
+
+    private func isResolvedBeforeThisBuild(_ line:String,_ date:Date,installedAt:Date)->Bool {
+        if line.localizedCaseInsensitiveContains("ambiguous column name: book") && date < installedAt { return true }
+        let isOldCalibreTimeout=line.localizedCaseInsensitiveContains("TimeoutExpired")
+            && line.localizedCaseInsensitiveContains("calibredb")
+            && line.localizedCaseInsensitiveContains("timed out after 20 seconds")
+        return isOldCalibreTimeout && date < installedAt
+    }
+
+    /// Returns the timestamp of the most recent successful run recorded by a log.
+    /// Older failures are hidden from current status and diagnostic exports once their
+    /// own process has completed successfully; raw log files remain available for audit.
+    private func latestSuccessfulRun(in lines:[String],logPath:String)->Date? {
+        let name=(logPath as NSString).lastPathComponent.lowercased()
+        // launchd captures stderr/stdout in sidecar files, while successful run
+        // markers are written to the main log. Reconcile those siblings so a stale
+        // traceback cannot outlive a later successful run of the same job.
+        if name.hasSuffix(".stderr.log") || name.hasSuffix(".stdout.log") {
+            let companion:String
+            if name.contains("icloud-importer") {
+                companion="\(logsPath)/calibre-icloud-import.log"
+            } else {
+                companion=logPath.replacingOccurrences(of:".stderr.log",with:".log")
+                    .replacingOccurrences(of:".stdout.log",with:".log")
+            }
+            if companion != logPath {
+                let companionLines=tail(companion,lines:240)
+                if let recovered=latestSuccessfulRun(in:companionLines,logPath:companion) { return recovered }
+            }
+        }
+        for index in lines.indices.reversed() {
+            let line=lines[index]
+            let success:Bool
+            if name.contains("kosync-calibre-bridge") {
+                success=line.localizedCaseInsensitiveContains("BRIDGE END")
+            } else if name.contains("icloud-import") || name.contains("importer") {
+                if line.localizedCaseInsensitiveContains("Import pass beendet") {
+                    let start=max(lines.startIndex,index-16)
+                    let prior=lines[start..<index].reversed()
+                    let failures=prior.first { $0.localizedCaseInsensitiveContains("Fehlgeschlagen:") || $0.localizedCaseInsensitiveContains("failed:") }
+                    success=failures.map { Self.capture(#"(?i)(?:Fehlgeschlagen|failed):\s*(\d+)"#,$0) == "0" } ?? false
+                } else { success=false }
+            } else if name.contains("malware") {
+                success=line.localizedCaseInsensitiveContains("All scanned incoming files are clean")
+                    || line.range(of:#"(?i)\bCLEAN:"#,options:.regularExpression) != nil
+            } else if name.contains("japanese-audit") {
+                success=reportsNoIssues(line)
+            } else if name.contains("duplicate-audit") {
+                success=line.localizedCaseInsensitiveContains("NO EXACT BINARY DUPLICATES")
+            } else if name.contains("restic-backup") {
+                success=line.localizedCaseInsensitiveContains("ICLOUD MIRROR OK")
+            } else {
+                success=false
+            }
+            if success,let date=eventDate(at:index,in:lines,fallback:nil) { return date }
+        }
+        return nil
+    }
+
     private func compactDiagnosticLine(_ source:String)->String {
         var line=redact(source)
         line=line.replacingOccurrences(of:#"^.*?\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[\] :]\s*"#,with:"",options:.regularExpression)
@@ -1968,6 +2333,20 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         return f.date(from:stamp)
     }
 
+    /// Many scripts timestamp a run header and leave the following detail lines
+    /// unstamped. Reuse the nearest preceding timestamp instead of treating the
+    /// file's modification time as the event time (which makes old errors look new).
+    private func eventDate(at index:Int,in lines:[String],fallback:Date?)->Date? {
+        guard !lines.isEmpty,index >= 0,index < lines.count else { return fallback }
+        var cursor=index
+        for _ in 0..<min(48,index+1) {
+            if let date=eventDate(lines[cursor]) { return date }
+            if cursor == 0 { break }
+            cursor -= 1
+        }
+        return fallback
+    }
+
     private func formatInterval(_ value:Double)->String {
         if value>=604800 { return "Every week" }
         if value>=86400 { return "Every day" }
@@ -1980,6 +2359,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func md5(_ value:String)->String { let digest=Insecure.MD5.hash(data:Data(value.utf8)); return digest.map{String(format:"%02x",$0)}.joined() }
 
     private static func run(_ executable:String,_ args:[String],input:String?=nil)->(code:Int32,output:String) {
+        if executable == "/usr/bin/false" {
+            return (127, "Shelf's Python runtime is missing. Reinstall Shelf from its complete DMG.")
+        }
         let p=Process(); p.executableURL=URL(fileURLWithPath:executable); p.arguments=args
         let out=Pipe(),err=Pipe(); p.standardOutput=out;p.standardError=err
         var inputPipe:Pipe?
