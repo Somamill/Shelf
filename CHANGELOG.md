@@ -1,3 +1,8 @@
+## 0.1.40
+
+- Restore the Dock, Finder, and app-switcher icon by ensuring `CFBundleIconFile` is present in the built app's Info.plist.
+- Verify the bundled icon resource during every Xcode build.
+
 ## 0.1.39
 
 - Make large libraries faster by indexing connected books once per render, showing the Reading shelf first, and loading 12 cards at a time.
