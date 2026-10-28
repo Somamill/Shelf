@@ -1,3 +1,10 @@
+## 0.1.41
+
+- Default the shelf to actual available books and active reading records; keep the large external catalog available under Everything.
+- Count audiobooks only when the source identifies audio, not for every Hardcover connection.
+- Automatically refresh Calibre full-text indexing status and translate Calibre's plugin noise into a clear progress message.
+- Improve responsive layout so filters and toolbars wrap instead of overlapping.
+
 ## 0.1.40
 
 - Restore the Dock, Finder, and app-switcher icon by ensuring `CFBundleIconFile` is present in the built app's Info.plist.

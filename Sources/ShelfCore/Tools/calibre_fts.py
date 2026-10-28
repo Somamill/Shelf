@@ -45,9 +45,14 @@ def main() -> int:
     except subprocess.TimeoutExpired:
         print(json.dumps({"ok": False, "message": "Calibre did not respond within 35 seconds. Try again when its server is idle."}))
         return 1
-    output = (result.stdout + "\n" + result.stderr).strip()
+    # Calibre plugins can print lifecycle hooks (for example NoTrans) on every
+    # invocation. They are debug chatter, not indexing failures or search hits.
+    output = "\n".join(
+        line for line in (result.stdout + "\n" + result.stderr).splitlines()
+        if not line.lstrip().startswith("NoTrans:")
+    ).strip()
     if result.returncode != 0:
-        message = output[-1000:] or "Calibre full-text search returned an error."
+        message = output[-500:] or "Calibre full-text search returned an error."
         print(json.dumps({"ok": False, "message": message}))
         return result.returncode
     if action == "search":
@@ -69,7 +74,28 @@ def main() -> int:
             payload = output[-6000:]
         print(json.dumps({"ok": True, "action": action, "results": payload}, ensure_ascii=False))
     else:
-        print(json.dumps({"ok": True, "action": action, "message": output[-1600:] or "Complete."}, ensure_ascii=False))
+        message = output[-500:] or "Calibre completed the request."
+        if action == "status":
+            indexed = None
+            import re
+            match = re.search(r"(\d+)\s+of\s+(\d+)\s+books?(?:\s+files)?\s+indexed", output, re.I)
+            if match:
+                indexed, total = map(int, match.groups())
+                progress = f"Calibre has indexed {indexed:,} of {total:,} local books."
+            else:
+                progress = "Calibre is checking its local book index."
+            enabled = "enabled" in output.lower() and "disabled" not in output.lower()
+            if enabled:
+                message = "Full-text search is on. " + progress
+                if indexed is not None and indexed < total:
+                    message += " Indexing continues in the background at low resource use."
+            else:
+                message = "Full-text search is paused. " + progress
+        elif action == "enable":
+            message = "Full-text indexing is on. Calibre will continue indexing in the background at low resource use."
+        elif action == "disable":
+            message = "Full-text indexing is paused."
+        print(json.dumps({"ok": True, "action": action, "message": message}, ensure_ascii=False))
     return 0
 
 

@@ -602,7 +602,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var components=URLComponents(string:"https://openlibrary.org/search.json")
             components?.queryItems=[URLQueryItem(name:"title",value:title),URLQueryItem(name:"limit",value:"10"),URLQueryItem(name:"fields",value:"cover_i,title,author_name")]
             guard let searchURL=components?.url else { return }
-            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.1.40 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.1.41 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var responseData:Data?,status=0
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 status=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -655,7 +655,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let source else { return }
             if let coverPath=source["coverPath"] as? String,!coverPath.isEmpty,
                let image=CGImageSourceCreateWithURL(URL(fileURLWithPath:coverPath) as CFURL,nil),CGImageSourceGetCount(image)>0 { return }
-            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.1.40 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.1.41 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var downloaded:Data?,statusCode=0,mimeType=""
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 statusCode=(response as? HTTPURLResponse)?.statusCode ?? 0
