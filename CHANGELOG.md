@@ -1,3 +1,7 @@
+## 0.1.38
+
+- Keep bundled Python bytecode caches under the user's Library/Caches folder so app startup and sync helpers never mutate the signed Shelf bundle.
+
 ## 0.1.37
 
 - Fix Homebrew tap instructions for the Shelf repository name and align the cask stanza order with Homebrew's current style rules.

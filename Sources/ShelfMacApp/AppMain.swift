@@ -2363,6 +2363,21 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             return (127, "Shelf's Python runtime is missing. Reinstall Shelf from its complete DMG.")
         }
         let p=Process(); p.executableURL=URL(fileURLWithPath:executable); p.arguments=args
+        if executable.contains("/Contents/Resources/PythonRuntime/") {
+            // Keep CPython bytecode caches outside Shelf.app. Writing __pycache__
+            // into the signed bundle invalidates its code signature after launch.
+            if let caches=FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask).first {
+                let cacheDirectory=caches.appendingPathComponent("Shelf/PythonCache",isDirectory:true)
+                var environment=ProcessInfo.processInfo.environment
+                do {
+                    try FileManager.default.createDirectory(at:cacheDirectory,withIntermediateDirectories:true)
+                    environment["PYTHONPYCACHEPREFIX"]=cacheDirectory.path
+                } catch {
+                    environment["PYTHONDONTWRITEBYTECODE"]="1"
+                }
+                p.environment=environment
+            }
+        }
         let out=Pipe(),err=Pipe(); p.standardOutput=out;p.standardError=err
         var inputPipe:Pipe?
         if input != nil { let q=Pipe(); p.standardInput=q;inputPipe=q }
