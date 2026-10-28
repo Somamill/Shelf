@@ -1,3 +1,12 @@
+## 0.1.39
+
+- Make large libraries faster by indexing connected books once per render, showing the Reading shelf first, and loading 12 cards at a time.
+- Group Calibre, Hardcover, and Apple Books locations into one title card more efficiently.
+- Persist confirmed Open Library cover matches through Calibre so repaired covers remain across devices.
+- Add one-click copy of full recent local logs and errors to the clipboard with secret redaction.
+- Automatically find a unique cover for a local Calibre book and save it through Calibre; report metadata-only catalog entries separately from local-file issues.
+- Respect macOS high-contrast, reduced-transparency, and reduced-motion settings; refine page and card transitions.
+
 ## 0.1.38
 
 - Keep bundled Python bytecode caches under the user's Library/Caches folder so app startup and sync helpers never mutate the signed Shelf bundle.

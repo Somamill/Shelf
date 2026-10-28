@@ -127,6 +127,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerSettingsPopover:NSPopover?
     private let coverSourceLock=NSLock()
     private var coverSources:[Int:[String:Any]] = [:]
+    private let coverRepairLock=NSLock()
+    private var coverRepairsInFlight=Set<Int>()
+    private let coverLookupLock=NSLock()
+    private var coverLookupsInFlight=Set<Int>()
     private var readerChapters:[[String:Any]]=[]
     private var readerFontSize:Double=19
     private var readerFontChoice="sans"
@@ -369,6 +373,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "loadBooks": loadBooks()
         case "calibreFullText": runCalibreFullText(body["action"] as? String ?? "status", query: body["query"] as? String ?? "")
         case "loadBookCover": if let bookId=body["bookId"] as? Int { loadBookCover(bookId) }
+        case "repairMissingBookCover": if let bookId=body["bookId"] as? Int { repairMissingBookCover(bookId) }
+        case "saveBookCover": if let bookId=body["bookId"] as? Int,let url=body["url"] as? String { saveBookCover(bookId,url:url) }
         case "loadAppleBooks": loadAppleBooks()
         case "importAppleBooksCatalog": importAppleBooksCatalog()
         case "openAppleBooks":
@@ -389,6 +395,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "searchHardcover": searchHardcover(body["query"] as? String ?? "")
         case "openBookLink": if let value=body["url"] as? String { openBookLink(value) }
         case "exportDiagnostics": exportDiagnostics(body["additionalText"] as? String ?? "")
+        case "copyLogsToClipboard": copyLogsToClipboard()
         case "action": if let id=body["id"] as? String { confirmAndRun(id) }
         case "copy": if let text=body["text"] as? String { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string); notify("Copied to clipboard") }
         case "openLog": if let path=body["path"] as? String { NSWorkspace.shared.open(URL(fileURLWithPath:path)) }
@@ -580,6 +587,96 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard let source else { send("bookCoverLoaded",["bookId":bookId,"coverData":NSNull()]); return }
         let covered=withCover(source)
         send("bookCoverLoaded",["bookId":bookId,"coverData":covered["coverData"] ?? NSNull()])
+    }
+
+    private func repairMissingBookCover(_ bookId:Int) {
+        guard bookId>0 else { return }
+        coverLookupLock.lock();guard !coverLookupsInFlight.contains(bookId) else { coverLookupLock.unlock();return };coverLookupsInFlight.insert(bookId);coverLookupLock.unlock()
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            defer { self.coverLookupLock.lock();self.coverLookupsInFlight.remove(bookId);self.coverLookupLock.unlock() }
+            self.coverSourceLock.lock();let source=self.coverSources[bookId];self.coverSourceLock.unlock()
+            guard let source,let title=source["title"] as? String,!title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+            if let coverPath=source["coverPath"] as? String,!coverPath.isEmpty,
+               let image=CGImageSourceCreateWithURL(URL(fileURLWithPath:coverPath) as CFURL,nil),CGImageSourceGetCount(image)>0 { return }
+            var components=URLComponents(string:"https://openlibrary.org/search.json")
+            components?.queryItems=[URLQueryItem(name:"title",value:title),URLQueryItem(name:"limit",value:"10"),URLQueryItem(name:"fields",value:"cover_i,title,author_name")]
+            guard let searchURL=components?.url else { return }
+            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.1.39 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            let semaphore=DispatchSemaphore(value:0);var responseData:Data?,status=0
+            URLSession.shared.dataTask(with:request) { data,response,_ in
+                status=(response as? HTTPURLResponse)?.statusCode ?? 0
+                if let data,data.count<=2*1024*1024 { responseData=data }
+                semaphore.signal()
+            }.resume()
+            guard semaphore.wait(timeout: .now() + 14) == .success, status == 200, let responseData,
+                  let payload=try? JSONSerialization.jsonObject(with:responseData) as? [String:Any],
+                  let documents=payload["docs"] as? [[String:Any]] else {
+                NSLog("Shelf: automatic Calibre cover search failed for book %d (HTTP %d)",bookId,status);return
+            }
+            func normalized(_ value:String)->String {
+                value.precomposedStringWithCompatibilityMapping.lowercased()
+                    .components(separatedBy:CharacterSet.alphanumerics.inverted)
+                    .filter{!$0.isEmpty}.joined(separator:" ")
+            }
+            let wanted=normalized(title)
+            let exact=documents.filter { document in
+                guard let candidate=document["title"] as? String,normalized(candidate)==wanted,
+                      let cover=document["cover_i"] as? Int,cover>0 else { return false }
+                return true
+            }
+            guard !exact.isEmpty else { return }
+            let chosen:[String:Any]?
+            if exact.count==1 { chosen=exact[0] }
+            else {
+                let author=normalized(source["authors"] as? String ?? "")
+                let authorMatches=exact.filter { document in
+                    let names=(document["author_name"] as? [String] ?? []).map(normalized)
+                    return !author.isEmpty && names.contains { name in
+                        let a=Set(author.split(whereSeparator:{$0.isWhitespace})),b=Set(name.split(whereSeparator:{$0.isWhitespace}))
+                        return !a.isDisjoint(with:b)
+                    }
+                }
+                chosen=authorMatches.count==1 ? authorMatches[0] : nil
+            }
+            guard let chosen,let coverID=chosen["cover_i"] as? Int,coverID>0,
+                  let coverURL=URL(string:"https://covers.openlibrary.org/b/id/\(coverID)-M.jpg") else { return }
+            self.saveBookCover(bookId,url:coverURL.absoluteString)
+        }
+    }
+
+    private func saveBookCover(_ bookId:Int,url rawURL:String) {
+        guard bookId>0,let url=URL(string:rawURL),url.scheme=="https",url.host=="covers.openlibrary.org" else { return }
+        coverRepairLock.lock();guard !coverRepairsInFlight.contains(bookId) else { coverRepairLock.unlock();return };coverRepairsInFlight.insert(bookId);coverRepairLock.unlock()
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            defer { self.coverRepairLock.lock();self.coverRepairsInFlight.remove(bookId);self.coverRepairLock.unlock() }
+            self.coverSourceLock.lock();let source=self.coverSources[bookId];self.coverSourceLock.unlock()
+            guard let source else { return }
+            if let coverPath=source["coverPath"] as? String,!coverPath.isEmpty,
+               let image=CGImageSourceCreateWithURL(URL(fileURLWithPath:coverPath) as CFURL,nil),CGImageSourceGetCount(image)>0 { return }
+            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.1.39 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            let semaphore=DispatchSemaphore(value:0);var downloaded:Data?,statusCode=0,mimeType=""
+            URLSession.shared.dataTask(with:request) { data,response,_ in
+                statusCode=(response as? HTTPURLResponse)?.statusCode ?? 0
+                mimeType=response?.mimeType?.lowercased() ?? ""
+                if let data,data.count<=8*1024*1024 { downloaded=data }
+                semaphore.signal()
+            }.resume()
+            guard semaphore.wait(timeout: .now() + 14) == .success, statusCode == 200,
+                  ["image/jpeg","image/png"].contains(mimeType),let data=downloaded,!data.isEmpty else { return }
+            let temp=FileManager.default.temporaryDirectory.appendingPathComponent("shelf-cover-\(bookId)-\(UUID().uuidString).jpg")
+            defer { try? FileManager.default.removeItem(at:temp) }
+            do { try data.write(to:temp,options:.atomic) } catch { return }
+            let calibre="/Applications/calibre.app/Contents/MacOS/calibredb"
+            let library=self.configuration.value("services.calibreCli",fallback:"http://127.0.0.1:8080/#Calibre_Library")
+            var auth=[String]()
+            if !self.serverPassword().isEmpty { auth=["--username",self.username,"--password","<f:\(self.statePath)/calibre-server-password>"] }
+            let result=Self.run(calibre,["--timeout","20","--with-library",library]+auth+["set_metadata",String(bookId),"--field","cover:\(temp.path)"])
+            guard result.code==0 else { NSLog("Shelf: automatic Calibre cover repair failed for book %d",bookId);return }
+            NSLog("Shelf: Calibre cover repaired for book %d",bookId)
+            DispatchQueue.main.async { self.loadBooks() }
+        }
     }
 
     private func loadAppleBooks() {
@@ -2045,6 +2142,36 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
+    private func copyLogsToClipboard() {
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            guard let self else { return }
+            let directory=URL(fileURLWithPath:self.logsPath,isDirectory:true),fm=FileManager.default
+            let files=(try? fm.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.contentModificationDateKey],options:[.skipsHiddenFiles]))?.filter{url in
+                let name=url.lastPathComponent.lowercased()
+                return name.hasSuffix(".log") || name.range(of:#"\.log\.\d+$"#,options:.regularExpression) != nil || [".err",".stderr",".stdout"].contains(where:name.hasSuffix)
+            }.sorted{
+                let a=(try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b=(try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a>b
+            } ?? []
+            var sections=[String](),remaining=100*1024*1024
+            let cutoff=Date().addingTimeInterval(-90*86400)
+            for file in files {
+                let modified=(try? file.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                guard modified>=cutoff,remaining>0,let data=try? Data(contentsOf:file),!data.isEmpty else { continue }
+                guard data.count<=remaining else { sections.append("===== \(file.lastPathComponent) · omitted because the 100 MB clipboard safety limit was reached =====");continue }
+                sections.append("===== \(file.lastPathComponent) · full log · updated \(DateFormatter.localizedString(from:modified,dateStyle:.medium,timeStyle:.short)) =====\n\(self.redact(String(decoding:data,as:UTF8.self)))")
+                remaining -= data.count
+            }
+            let heading="Shelf logs and errors · \(DateFormatter.localizedString(from:Date(),dateStyle:.medium,timeStyle:.medium)) · \(TimeZone.current.identifier)\nFull contents of local log and error files updated in the last 90 days are included, up to 100 MB. Credentials and tokens are redacted.\n"
+            let output=heading+(sections.isEmpty ? "No recent local log files were found.\n" : sections.joined(separator:"\n\n"))
+            DispatchQueue.main.async {
+                NSPasteboard.general.clearContents();NSPasteboard.general.setString(output,forType:.string)
+                self.notify("Logs and errors copied to clipboard · \(sections.count) files")
+            }
+        }
+    }
+
     private func createDiagnosticBundle(at destination:URL,additionalText:String) throws -> Int {
         let fm=FileManager.default
         let root=fm.temporaryDirectory.appendingPathComponent("CalibreStackDiagnostics-\(UUID().uuidString)",isDirectory:true)
@@ -2319,9 +2446,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var line=sourceLine
             line=line.replacingOccurrences(of:#"(?i)((?:password|passwd|token|secret|authorization|api[_-]?key|x-auth-key)(?:[_-](?:file|command|hash))?[\"']?\s*[:=]\s*[\"']?)[^\"'\s,;}&]+"#,with:"$1[hidden]",options:.regularExpression)
             line=line.replacingOccurrences(of:#"(?i)((?:password|passwd|token|secret|authorization|api[_-]?key|x-auth-key)(?:[_-](?:file|command|hash))?\s+)[^\s,;]+"#,with:"$1[hidden]",options:.regularExpression)
+            line=line.replacingOccurrences(of:#"(?i)((?:password|passwd|token|secret|api[_-]?key)[^,\]]{0,24},\s*[\"'])[^\"']+(?=[\"'])"#,with:"$1[hidden]",options:.regularExpression)
             line=line.replacingOccurrences(of:#"(?i)([?&](?:password|passwd|token|secret|api[_-]?key)=)[^&\s]+"#,with:"$1[hidden]",options:.regularExpression)
             line=line.replacingOccurrences(of:#"(?i)(Basic\s+)[A-Za-z0-9+/=]+"#,with:"$1[hidden]",options:.regularExpression)
             line=line.replacingOccurrences(of:#"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+"#,with:"$1[hidden]",options:.regularExpression)
+            line=line.replacingOccurrences(of:#"(?i)(://[^:/\s]+:)[^@/\s]+@"#,with:"$1[hidden]@",options:.regularExpression)
             return line
         }.joined(separator:"\n")
     }
