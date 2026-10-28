@@ -90,8 +90,9 @@ fi
 osascript -e 'tell application "Shelf" to quit' >/dev/null 2>&1 || true
 if xcodebuild -version >/dev/null 2>&1; then
   xcodebuild -project "$PROJECT_ROOT/Shelf.xcodeproj" -scheme Shelf -configuration Release \
-    -derivedDataPath "$DERIVED_DATA" CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" CODE_SIGNING_ALLOWED=YES build
+    -derivedDataPath "$DERIVED_DATA" CODE_SIGNING_ALLOWED=NO build
   BUILT_APP="$DERIVED_DATA/Build/Products/Release/Shelf.app"
+  codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILT_APP"
 else
   BUILT_APP="$BUILD_ROOT/Manual/Shelf.app"
   CONTENTS="$BUILT_APP/Contents"
@@ -120,8 +121,8 @@ else
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.1.27</string>
-<key>CFBundleVersion</key><string>28</string>
+<key>CFBundleShortVersionString</key><string>0.1.33</string>
+<key>CFBundleVersion</key><string>34</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

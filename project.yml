@@ -43,6 +43,8 @@ targets:
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/apple_books.py
         buildPhase: resources
+      - path: Sources/ShelfCore/Tools/open_library_book.py
+        buildPhase: resources
       - path: Config/config.example.json
         buildPhase: resources
     dependencies:
@@ -52,8 +54,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.30
-        CURRENT_PROJECT_VERSION: 31
+        MARKETING_VERSION: 0.1.33
+        CURRENT_PROJECT_VERSION: 34
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES

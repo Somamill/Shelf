@@ -13,7 +13,11 @@ let variants: [(Int, String)] = [
 ]
 
 func point(_ x: CGFloat, _ y: CGFloat, _ size: CGFloat) -> NSPoint {
-    NSPoint(x: x * size, y: y * size)
+    // Use more of the icon canvas so the book reads clearly in the Dock and
+    // app switcher without changing the minimal silhouette.
+    let scale: CGFloat = 1.10
+    return NSPoint(x: (0.5 + (x - 0.5) * scale) * size,
+                   y: (0.52 + (y - 0.52) * scale) * size)
 }
 
 for (pixels, filename) in variants {

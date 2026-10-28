@@ -4,6 +4,7 @@ import ImageIO
 import Foundation
 import UniformTypeIdentifiers
 import WebKit
+import SQLite3
 import ShelfCore
 
 private final class WeakScriptMessageHandler:NSObject, WKScriptMessageHandler {
@@ -124,6 +125,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerProgressSlider:NSSlider?
     private var readerProgressLabel:NSTextField?
     private var readerSettingsPopover:NSPopover?
+    private let coverSourceLock=NSLock()
+    private var coverSources:[Int:[String:Any]] = [:]
     private var readerChapters:[[String:Any]]=[]
     private var readerFontSize:Double=19
     private var readerFontChoice="sans"
@@ -318,7 +321,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
         case "chooseSetupFolder": chooseSetupFolder(body["role"] as? String ?? "library")
         case "appearance":
-            let mode=(body["mode"] as? String) == "system" ? "system" : "oled"
+            let mode=(body["mode"] as? String) == "bright" ? "bright" : "oled"
             let resolved=(body["resolved"] as? String) == "light" ? "light" : "dark"
             UserDefaults.standard.set(mode,forKey:"shelfAppearance")
             UserDefaults.standard.set(resolved,forKey:"shelfResolvedAppearance")
@@ -344,13 +347,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 notify("BookPlayer runs on your iPhone. Its synced reading status appears here when Hardcover is connected.")
             }
         case "loadBooks": loadBooks()
+        case "loadBookCover": if let bookId=body["bookId"] as? Int { loadBookCover(bookId) }
         case "loadAppleBooks": loadAppleBooks()
+        case "importAppleBooksCatalog": importAppleBooksCatalog()
         case "openAppleBooks":
             let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.iBooksX") ?? URL(fileURLWithPath:"/System/Applications/Books.app")
             NSWorkspace.shared.open(url)
         case "openFullDiskAccessSettings":
             if let url=URL(string:"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
         case "openBook": if let bookId=body["bookId"] as? Int { openBook(bookId) }
+        case "openLibraryBook": if let bookId=body["bookId"] as? Int { openLibraryBook(bookId) }
         case "setBookFinished":
             if let bookId=body["bookId"] as? Int {
                 setBookFinished(bookId, finished: body["finished"] as? Bool ?? true)
@@ -490,31 +496,180 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 DispatchQueue.main.async { self.send("bookshelfError",["message":"Could not read the local Calibre library: \(result.output.trimmingCharacters(in:.whitespacesAndNewlines).suffix(240))"]) }
                 return
             }
-            let reading=(payload["reading"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            let recent=(payload["recent"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            let finished=(payload["finished"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            let allBooks=(payload["allBooks"] as? [[String:Any]] ?? []).map { self.withCover($0) }
-            payload["reading"]=reading
-            payload["recent"]=recent
-            payload["finished"]=finished
+            // Keep the WebKit bridge payload compact. Covers are fetched on
+            // demand for visible cards instead of embedding them in the entire
+            // catalog response.
+            let allBooks=(payload["allBooks"] as? [[String:Any]] ?? []).sorted {
+                (($0["title"] as? String) ?? "").localizedStandardCompare(($1["title"] as? String) ?? "") == .orderedAscending
+            }
             payload["allBooks"]=allBooks
+            self.coverSourceLock.lock()
+            self.coverSources=Dictionary(uniqueKeysWithValues:allBooks.compactMap { book in
+                guard let id=book["id"] as? Int else { return nil }
+                return (id,book)
+            })
+            self.coverSourceLock.unlock()
             DispatchQueue.main.async { self.send("bookshelfData",payload) }
         }
     }
 
+    private func loadBookCover(_ bookId:Int) {
+        coverSourceLock.lock(); let source=coverSources[bookId]; coverSourceLock.unlock()
+        guard let source else { send("bookCoverLoaded",["bookId":bookId,"coverData":NSNull()]); return }
+        let covered=withCover(source)
+        send("bookCoverLoaded",["bookId":bookId,"coverData":covered["coverData"] ?? NSNull()])
+    }
+
     private func loadAppleBooks() {
-        guard let script=Bundle.main.resourceURL?.appendingPathComponent("apple_books.py").path else {
-            send("appleBooksData",["status":"unavailable","books":[]]); return
-        }
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script])
-            guard result.code == 0, let bytes=result.output.data(using:.utf8),
-                  let payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any] else {
-                DispatchQueue.main.async { self.send("appleBooksData",["status":"unavailable","books":[]]) }
+            let payload=self.readAppleBooksDatabase()
+            DispatchQueue.main.async { self.send("appleBooksData",payload) }
+        }
+    }
+
+    private func readAppleBooksDatabase() -> [String:Any] {
+        let roots=[
+            "Library/Containers/com.apple.iBooksX/Data/Documents",
+            "Library/Containers/com.apple.BKAgentService/Data/Documents",
+            "Library/Group Containers/group.com.apple.iBooks",
+            "Library/Group Containers/group.com.apple.BKAgentService"
+        ].map { URL(fileURLWithPath:home).appendingPathComponent($0,isDirectory:true) }
+        var denied=false,databases=[URL]()
+        for root in roots {
+            var isDirectory:ObjCBool=false
+            guard FileManager.default.fileExists(atPath:root.path,isDirectory:&isDirectory),isDirectory.boolValue else { continue }
+            guard let enumerator=FileManager.default.enumerator(at:root,includingPropertiesForKeys:[.isRegularFileKey],options:[],errorHandler:{ _,error in
+                if (error as NSError).code == NSFileReadNoPermissionError || (error as NSError).code == Int(EPERM) { denied=true }
+                return true
+            }) else { continue }
+            for case let url as URL in enumerator {
+                let filename=url.lastPathComponent
+                if filename.hasPrefix("BKLibrary"),["sqlite","sqlite3"].contains(url.pathExtension.lowercased()) { databases.append(url) }
+            }
+        }
+        for url in databases.sorted(by:{$0.path<$1.path}) {
+            var db:OpaquePointer?
+            guard sqlite3_open_v2(url.path,&db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,nil) == SQLITE_OK,let db else {
+                if let db { sqlite3_close(db) }; continue
+            }
+            defer { sqlite3_close(db) }
+            var tableQuery:OpaquePointer?
+            var tables=Set<String>()
+            if sqlite3_prepare_v2(db,"SELECT name FROM sqlite_master WHERE type='table'",-1,&tableQuery,nil) == SQLITE_OK,let tableQuery {
+                while sqlite3_step(tableQuery) == SQLITE_ROW { if let name=sqlite3_column_text(tableQuery,0) { tables.insert(String(cString:name)) } }
+                sqlite3_finalize(tableQuery)
+            }
+            guard tables.contains("ZBKLIBRARYASSET") else { continue }
+            var columnQuery:OpaquePointer?
+            var columns=Set<String>()
+            if sqlite3_prepare_v2(db,"PRAGMA table_info('ZBKLIBRARYASSET')",-1,&columnQuery,nil) == SQLITE_OK,let columnQuery {
+                while sqlite3_step(columnQuery) == SQLITE_ROW { if let name=sqlite3_column_text(columnQuery,1) { columns.insert(String(cString:name).uppercased()) } }
+                sqlite3_finalize(columnQuery)
+            }
+            let mapping:[(String,String)]=[("title","ZTITLE"),("author","ZAUTHOR"),("progress","ZREADINGPROGRESS"),("highWater","ZHIGHWATERMARKPROGRESS"),("duration","ZDURATION"),("assetId","ZASSETID"),("guid","ZPERMANENTID"),("coverURL","ZURL"),("kind","ZKIND"),("audioFlag","ZISSTOREAUDIOBOOK"),("finished","ZISFINISHED"),("lastOpened","ZLASTOPENDATE"),("lastEngaged","ZLASTENGAGEDDATE"),("hidden","ZHIDDEN"),("sample","ZISSAMPLE"),("supplemental","ZISSUPPLEMENTAL")]
+            let available=mapping.filter{columns.contains($0.1)}
+            guard available.contains(where:{$0.0=="title"}),available.contains(where:{["progress","highWater"].contains($0.0)}) else {
+                return ["status":"unsupported_schema","books":[]]
+            }
+            let query="SELECT "+available.map{"\"\($0.1)\" AS \"\($0.0)\""}.joined(separator:",")+" FROM ZBKLIBRARYASSET"
+            var rows:OpaquePointer?
+            guard sqlite3_prepare_v2(db,query,-1,&rows,nil) == SQLITE_OK,let rows else { continue }
+            var result=[[String:Any]]()
+            func text(_ index:Int32)->String? { guard sqlite3_column_type(rows,index) != SQLITE_NULL,let value=sqlite3_column_text(rows,index) else { return nil };return String(cString:value).trimmingCharacters(in:.whitespacesAndNewlines) }
+            func number(_ index:Int32)->Double? { sqlite3_column_type(rows,index) == SQLITE_NULL ? nil : sqlite3_column_double(rows,index) }
+            let indices=Dictionary(uniqueKeysWithValues:available.enumerated().map{($0.element.0,Int32($0.offset))})
+            func value(_ key:String)->String? { indices[key].flatMap{text($0)} }
+            func date(_ key:String)->String? {
+                guard let index=indices[key],let raw=number(index),raw>0 else { return nil }
+                let seconds=raw < 500_000_000 ? raw+978_307_200 : raw
+                let formatter=ISO8601DateFormatter();formatter.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
+                return formatter.string(from:Date(timeIntervalSince1970:seconds))
+            }
+            while sqlite3_step(rows) == SQLITE_ROW {
+                guard let title=value("title"),!title.isEmpty else { continue }
+                let kind=(value("kind") ?? "").lowercased(),audio=(indices["audioFlag"].map{number($0) ?? 0 > 0} ?? false) || kind.contains("audiobook") || kind.contains("audio-book")
+                if ["hidden","sample","supplemental"].contains(where:{indices[$0].map{number($0) ?? 0 > 0} ?? false}) { continue }
+                let progressIndex=indices["progress"] ?? indices["highWater"]!
+                let progress=min(1,max(0,number(progressIndex) ?? 0))
+                let duration=indices["duration"].flatMap{number($0)}.map{Int(max(0,$0))}
+                result.append(["title":title,"author":value("author") ?? "","mediaType":audio ? "audiobook":"book","progress":progress,"duration":duration as Any? ?? NSNull(),"assetId":value("assetId") as Any? ?? NSNull(),"guid":value("guid") as Any? ?? NSNull(),"coverURL":value("coverURL") as Any? ?? NSNull(),"finished":(indices["finished"].map{number($0) ?? 0 > 0} ?? false) || progress >= 0.97,"lastOpened":date("lastOpened") as Any? ?? NSNull(),"lastEngaged":date("lastEngaged") as Any? ?? NSNull()])
+            }
+            sqlite3_finalize(rows)
+            result.sort{String(describing:$0["lastEngaged"] ?? $0["lastOpened"] ?? "") > String(describing:$1["lastEngaged"] ?? $1["lastOpened"] ?? "")}
+            return ["status":"connected","books":result]
+        }
+        return ["status":denied ? "permission_required":"not_found","books":[]]
+    }
+
+    private func importAppleBooksCatalog() {
+        notify("Reading Apple Books titles…")
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            guard let self else { return }
+            let payload=self.readAppleBooksDatabase()
+            guard payload["status"] as? String == "connected",
+                  let books=payload["books"] as? [[String:Any]] else {
+                let status=payload["status"] as? String ?? "unavailable"
+                DispatchQueue.main.async {
+                    self.notify(status == "permission_required" ? "macOS is still blocking Apple Books access for Shelf. Enable Shelf under Full Disk Access, then reopen it." : "Apple Books catalog is not available on this Mac yet.")
+                }
                 return
             }
-            DispatchQueue.main.async { self.send("appleBooksData",payload) }
+            let calibre="/Applications/calibre.app/Contents/MacOS/calibredb"
+            let calibreLibrary=self.configuration.value("services.calibreCli",fallback:"http://127.0.0.1:8080/#Calibre_Library")
+            let passwordFile="<f:\(self.statePath)/calibre-server-password>"
+            var authArgs=[String]()
+            if !self.serverPassword().isEmpty { authArgs=["--username",self.username,"--password",passwordFile] }
+            let remoteList=Self.run(calibre,["--with-library",calibreLibrary]+authArgs+["list","--fields","title,authors","--for-machine"])
+            let cleanOutput=remoteList.output.components(separatedBy:.newlines).filter{ !$0.hasPrefix("NoTrans:") }.joined(separator:"\n")
+            let jsonOutput=cleanOutput.firstIndex(of:"[").flatMap { start in
+                cleanOutput[start...].lastIndex(of:"]").map { end in String(cleanOutput[start...end]) }
+            } ?? ""
+            guard remoteList.code == 0,
+                  let remoteBooks=try? JSONSerialization.jsonObject(with:Data(jsonOutput.utf8)) as? [[String:Any]] else {
+                DispatchQueue.main.async { self.notify("Could not safely read the live Calibre catalog. No Apple Books entries were added.") }
+                return
+            }
+            let existingResult=Self.run("/usr/bin/python3",[Bundle.main.resourceURL?.appendingPathComponent("bookshelf.py").path ?? ""])
+            let existingBooks=(try? JSONSerialization.jsonObject(with:Data(existingResult.output.utf8)) as? [String:Any])?["allBooks"] as? [[String:Any]] ?? []
+            func normalized(_ value:String)->String { value.folding(options:[.caseInsensitive,.diacriticInsensitive],locale:.current).split(whereSeparator:{$0.isWhitespace}).joined(separator:" ") }
+            var existing=Set(existingBooks.compactMap { book -> String? in
+                guard let title=book["title"] as? String,!title.isEmpty else { return nil }
+                return normalized(title)+"|"+normalized(book["authors"] as? String ?? "")
+            })
+            existing.formUnion(remoteBooks.compactMap { book -> String? in
+                guard let title=book["title"] as? String,!title.isEmpty else { return nil }
+                return normalized(title)+"|"+normalized(book["authors"] as? String ?? "")
+            })
+            var added=0,failed=0
+            for book in books {
+                let title=(book["title"] as? String ?? "").trimmingCharacters(in:.whitespacesAndNewlines)
+                let author=(book["author"] as? String ?? "Unknown author").trimmingCharacters(in:.whitespacesAndNewlines)
+                guard !title.isEmpty else { continue }
+                let key=normalized(title)+"|"+normalized(author)
+                if existing.contains(key) { continue }
+                let outcome=Self.run(calibre,["--with-library",calibreLibrary]+authArgs+["add","--empty","--title=\(title)","--authors=\(author)","--tags=Apple Books,External Catalog"])
+                if outcome.code == 0 { added += 1; existing.insert(key) } else { failed += 1 }
+            }
+            DispatchQueue.main.async {
+                self.notify("Apple Books catalog checked · \(added) new Calibre entries added\(failed > 0 ? " · \(failed) could not be added" : "") · existing titles were skipped. Apple Books files were not copied.")
+                self.loadBooks()
+            }
+        }
+    }
+
+    private func openLibraryBook(_ bookId:Int) {
+        guard bookId > 0, let script=Bundle.main.resourceURL?.appendingPathComponent("open_library_book.py").path else { return }
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result=Self.run("/usr/bin/python3",[script,String(bookId)])
+            guard result.code == 0,
+                  let payload=try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any],
+                  let path=payload["path"] as? String else {
+                let error=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["error"] as? String ?? "Could not locate a local book file."
+                DispatchQueue.main.async { self.notify(error) }; return
+            }
+            DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath:path)) }
         }
     }
 
@@ -1911,7 +2066,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func send(_ function:String,_ value:[String:Any]) {
         guard JSONSerialization.isValidJSONObject(value), let data=try? JSONSerialization.data(withJSONObject:value,options:[.fragmentsAllowed]), let json=String(data:data,encoding:.utf8) else { return }
-        webView.evaluateJavaScript("window.\(function)(\(json));",completionHandler:nil)
+        webView.evaluateJavaScript("window.\(function)(\(json));") { _, error in
+            if let error { NSLog("Shelf: dashboard callback %@ failed: %@",function,error.localizedDescription) }
+        }
     }
 
     private func launchInfo(_ service:String)->(pid:Int?,lastExit:Int?) {

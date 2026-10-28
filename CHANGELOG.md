@@ -1,3 +1,30 @@
+## 0.1.33
+
+- Added resilient book-cover fallbacks: failed artwork no longer leaves blank cards, and missing covers are fetched lazily from Open Library with a small request queue.
+- Added brief compositor-friendly page, card, and cover transitions that respect macOS Reduce Motion and run at the display's supported refresh rate.
+- Enlarged the minimalist book artwork within the Dock/app icon canvas.
+- Reworked the GitHub README with current feature scope, privacy notes, setup steps, project map, and an app screenshot.
+- Paginated the large shelf and moved local cover loading to visible book cards to keep WebKit responsive; external covers are borrowed from connected book sources before a throttled Open Library lookup.
+- Tightened source matching to retain subtitles and series names, normalize Japanese author spacing, and collapse exact duplicate records into one shelf card without deleting Calibre data.
+- Audited Calibre and sync data: 5 duplicate title/author groups were found after Unicode normalization and are grouped in the shelf; Calibre and OPDS authentication, KOReader Sync, CrossPoint Sync, and Readwise Reader were reachable. Three Readest progress records remain unmatchable because they contain only opaque file IDs and have no exact local file hash match.
+
+## 0.1.32
+
+- Counts all Calibre formats as library books and includes Apple Books ebooks and audiobooks in the shared reading shelf.
+- Uses Shelf's native Apple Books database reader for catalog imports and skips matching titles already in Calibre.
+- Shows Apple Books access state in the Books view and distinguishes reading from listening progress.
+- Confirms the saved Readwise Reader token against its API and displays the connection as active.
+- Keeps Xteink settings enforced at login and every five minutes; current CrossPoint firmware still requires a device-side sync action.
+
+## 0.1.31
+
+- Replaces the Overview and left sidebar with a floating bottom navigation bar and opens directly to My Books.
+- Adds focused Bright and true OLED Black themes across all dashboard surfaces.
+- Includes Apple Books titles and audiobooks in the unified book view and provides a metadata-only Calibre catalog import that never copies protected files.
+- Opens any supported local Calibre format in its default Mac app while keeping EPUBs in Shelf's reader.
+- Saves and verifies the previously supplied Readwise Reader token after detecting the missing local credential.
+- Clarifies that CrossPoint currently requires a device-side progress sync; its long-press action is set to launch sync directly and Smart Sync stays enabled.
+
 ## 0.1.30
 
 - Combines Calibre, Hardcover and Apple Books into one deduplicated shelf with simple source-aware actions and reading filters.

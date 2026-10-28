@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read audiobook progress from the local Apple Books library, if available.
+"""Read book and audiobook metadata/progress from Apple Books, if available.
 
 Apple does not expose this data through a public macOS API. This importer is
 intentionally read-only and treats the on-disk Books database as optional and
@@ -87,7 +87,7 @@ def read_database(path):
             item = dict(row)
             kind = str(item.get("kind") or "").lower()
             is_audio = bool(item.get("audioFlag")) or "audiobook" in kind or "audio-book" in kind
-            if not is_audio or not clean(item.get("title")):
+            if not clean(item.get("title")):
                 continue
             if any(bool(item.get(key)) for key in ("hidden", "sample", "supplemental")):
                 continue
@@ -105,6 +105,7 @@ def read_database(path):
                 duration = None
             books.append({
                 "title": clean(item.get("title")), "author": clean(item.get("author")) or "",
+                "mediaType": "audiobook" if is_audio else "book",
                 "progress": progress, "highWater": item.get("highWater"), "duration": duration,
                 "assetId": clean(item.get("assetId")), "guid": clean(item.get("guid")),
                 "coverURL": clean(item.get("coverURL")),
