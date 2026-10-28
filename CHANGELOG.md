@@ -1,3 +1,8 @@
+## 0.1.35
+
+- Refresh the public app screenshots with current Books, Connections, and Reading Statistics views using fictional sample data.
+- Update the README version, installation notes, and screenshot gallery to match this release candidate.
+
 ## 0.1.34
 
 - Added a first-launch quick setup that detects common Calibre library locations and prepares the incoming-books folder automatically; optional services can be connected later.

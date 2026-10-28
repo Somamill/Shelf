@@ -6,7 +6,7 @@
   <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
 </p>
 
-> Current version: **0.1.34** · macOS · MIT licensed
+> Current version: **0.1.35** · macOS · MIT licensed
 
 ## What Shelf does
 
@@ -19,11 +19,11 @@
 
 ### Shelf in action
 
-The public screenshot shows the library and import controls without exposing a personal book list or local network address.
+These showcase images use illustrative sample books and connection states. They do not contain a personal library, account details, or local network addresses.
 
-| Library and import | Current Shelf interface |
-| --- | --- |
-| ![Shelf library and import controls](Documentation/Screenshots/import-workflow.png) | ![Shelf home and book filters](Documentation/Screenshots/library.png) |
+| Bookshelf and EPUB import | Connected reading services | Reading statistics |
+| --- | --- | --- |
+| ![Shelf bookshelf and EPUB import](Documentation/Screenshots/library.png) | ![Shelf service connections](Documentation/Screenshots/connections.png) | ![Shelf reading statistics](Documentation/Screenshots/reading-statistics.png) |
 
 ## Install and build
 
