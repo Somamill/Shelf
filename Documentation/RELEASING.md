@@ -16,7 +16,7 @@ Use the Apple account's least-privileged suitable access. Never commit these val
 
 ## Create a release
 
-Push a version tag such as `v0.1.36`. The `macOS release` workflow builds Shelf with its universal Python runtimes, then either notarizes it or creates the unsigned community build. It publishes `Shelf.dmg`, a versioned app ZIP, and a SHA-256 checksum to the matching GitHub release. The Homebrew cask downloads the stable `Shelf.dmg` asset and discloses that macOS may require a one-time approval. Do not remove quarantine attributes or disable Gatekeeper to make installation appear seamless.
+Push a version tag such as `v0.1.37`. The `macOS release` workflow builds Shelf with its universal Python runtimes, then either notarizes it or creates the unsigned community build. It publishes `Shelf.dmg`, a versioned app ZIP, and a SHA-256 checksum to the matching GitHub release. The Homebrew cask downloads the stable `Shelf.dmg` asset and discloses that macOS may require a one-time approval. Do not remove quarantine attributes or disable Gatekeeper to make installation appear seamless.
 
 For the certificate and notarization requirements, see Apple's [Developer ID certificate guide](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/) and [notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 

@@ -5,5 +5,8 @@ let package = Package(
     name: "ShelfCore",
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [.library(name: "ShelfCore", targets: ["ShelfCore"])],
-    targets: [.target(name: "ShelfCore", path: "Sources/ShelfCore/ShelfCore")]
+    targets: [
+        .target(name: "ShelfCore", path: "Sources/ShelfCore/ShelfCore"),
+        .testTarget(name: "ShelfCoreTests", dependencies: ["ShelfCore"], path: "Tests/ShelfCoreTests")
+    ]
 )
