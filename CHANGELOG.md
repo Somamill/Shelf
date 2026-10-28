@@ -1,3 +1,9 @@
+## 0.1.36
+
+- Publish a self-contained community DMG when Apple Developer signing credentials are unavailable, with the same notarized path retained for later.
+- Include a SHA-256 checksum and clear first-launch Gatekeeper approval instructions; keep Gatekeeper enabled and do not remove download quarantine.
+- Disclose unsigned app approval in Homebrew installation guidance.
+
 ## 0.1.35
 
 - Refresh the public app screenshots with current Books, Connections, and Reading Statistics views using fictional sample data.
