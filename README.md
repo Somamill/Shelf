@@ -6,7 +6,7 @@
   <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
 </p>
 
-> Current version: **0.1.41** · macOS · MIT licensed
+> Current version: **0.1.42** · macOS · MIT licensed
 
 ## What Shelf does
 

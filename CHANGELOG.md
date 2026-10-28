@@ -1,3 +1,8 @@
+## 0.1.42
+
+- Make log copying visibly progress, report clipboard failures, and verify that macOS accepted the clipboard write.
+- Fall back to the macOS clipboard helper if the direct pasteboard write fails; leave the clipboard untouched when there are no recent logs.
+
 ## 0.1.41
 
 - Default the shelf to actual available books and active reading records; keep the large external catalog available under Everything.
