@@ -6,7 +6,7 @@
   <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
 </p>
 
-> Current version: **0.1.35** · macOS · MIT licensed
+> Current version: **0.1.36** · macOS · MIT licensed
 
 ## What Shelf does
 
@@ -29,13 +29,13 @@ These showcase images use illustrative sample books and connection states. They 
 
 ### Install a release
 
-Download the latest notarized [Shelf DMG](https://github.com/Somamill/Shelf/releases/latest) and drag Shelf into Applications. Homebrew users can install the same signed release with:
+Download the latest [Shelf DMG](https://github.com/Somamill/Shelf/releases/latest) and drag Shelf into Applications. Releases are self-contained and do not require Xcode, Command Line Tools, or a separate Python installation. Until Apple Developer signing is available, the DMG is an unsigned community build. If macOS blocks its first launch, open Shelf once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm. This approves Shelf while leaving Gatekeeper enabled. See [Apple's instructions](https://support.apple.com/en-nz/102445) and check the release's SHA-256 checksum before installing. Homebrew users can install it with:
 
 ```sh
 brew install --cask Somamill/Shelf/shelf
 ```
 
-The downloaded app runs without Xcode, Command Line Tools, or a separate Python installation. The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
+The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
 
 ### Build from source
 
@@ -47,7 +47,7 @@ cd Shelf
 Scripts/build-and-install.sh
 ```
 
-To package a locally built app for testing, run `Scripts/package-dmg.sh /Applications/Shelf.app`. Public releases use Developer ID signing and Apple notarization; see [release setup](Documentation/RELEASING.md).
+To package a locally built app for testing, run `Scripts/package-dmg.sh /Applications/Shelf.app`. See [release setup](Documentation/RELEASING.md) for the signed and unsigned release paths.
 
 ## Set up your reading sources
 

@@ -1,6 +1,6 @@
-# Releasing a signed macOS build
+# Releasing Shelf for macOS
 
-The repository includes the Shelf source and release pipeline. Publishing a downloadable app for other Macs needs a Developer ID Application certificate and Apple notarization. Apple requires Developer ID signing, Hardened Runtime, and a notarization ticket for this distribution path. Unsigned DMGs are useful for local testing but macOS may warn or block them, so Homebrew and public releases use only notarized artifacts.
+The release workflow builds a self-contained DMG for every version tag. It uses Developer ID signing and Apple notarization when the repository secrets are configured. If those credentials are unavailable, it publishes an ad-hoc signed, unsigned-for-distribution community build instead. Ad-hoc signing preserves bundle integrity but does not identify Shelf as an Apple-verified developer; macOS Gatekeeper remains enabled and users may need to approve the first launch manually using [Apple's documented steps](https://support.apple.com/en-nz/102445).
 
 ## One-time GitHub setup
 
@@ -16,10 +16,10 @@ Use the Apple account's least-privileged suitable access. Never commit these val
 
 ## Create a release
 
-Push a version tag such as `v0.1.1`. The `Signed macOS release` workflow archives Shelf, signs it with Developer ID, submits it with `notarytool`, staples the ticket, and uploads `Shelf.dmg` and a versioned ZIP to the matching GitHub release. The cask downloads the stable `Shelf.dmg` asset from the latest release. If the required secrets are missing or notarization fails, the job stops and does not publish an unsigned app archive.
+Push a version tag such as `v0.1.36`. The `macOS release` workflow builds Shelf with its universal Python runtimes, then either notarizes it or creates the unsigned community build. It publishes `Shelf.dmg`, a versioned app ZIP, and a SHA-256 checksum to the matching GitHub release. The Homebrew cask downloads the stable `Shelf.dmg` asset and discloses that macOS may require a one-time approval. Do not remove quarantine attributes or disable Gatekeeper to make installation appear seamless.
 
 For the certificate and notarization requirements, see Apple's [Developer ID certificate guide](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/) and [notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
 ## Installers and Homebrew
 
-The repository includes `Scripts/download-python-runtime.sh` to fetch and verify universal arm64/x86_64 Python runtimes, `Scripts/package-dmg.sh` for producing a standard drag-to-Applications DMG, and `Casks/shelf.rb` for Homebrew installation. The packaged app is self-contained and does not ask users to install developer tools or Python. The Homebrew cask intentionally tracks only the latest signed release. Configure the five Apple secrets above before publishing a release so the DMG can be notarized.
+The repository includes `Scripts/download-python-runtime.sh` to fetch and verify universal arm64/x86_64 Python runtimes, `Scripts/package-dmg.sh` for producing a standard drag-to-Applications DMG, and `Casks/shelf.rb` for Homebrew installation. The packaged app does not ask users to install developer tools or Python. The Homebrew cask tracks the latest release. Configure the five Apple secrets above whenever Developer ID signing and notarization become available; without them the workflow continues with the clearly labeled community build.

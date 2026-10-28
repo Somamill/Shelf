@@ -1,4 +1,4 @@
-name: Signed macOS release
+name: macOS release
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing version tag to package and notarize
+        description: Version tag to package and publish
         required: true
         type: string
 
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  signed-release:
+  macos-release:
     runs-on: macos-15
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
@@ -38,19 +38,34 @@ jobs:
           done
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Signed release skipped::Source release is available; configure Apple signing secrets to attach a notarized app. Missing: ${missing[*]}"
+            echo "::notice title=Using unsigned community build::Configure Apple signing secrets to publish a signed and notarized app. Missing: ${missing[*]}"
           else
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Install XcodeGen
-        if: steps.signing-check.outputs.available == 'true'
         run: brew install xcodegen
       - name: Prepare bundled universal Python runtime
-        if: steps.signing-check.outputs.available == 'true'
         run: Scripts/download-python-runtime.sh
       - name: Generate Xcode project
-        if: steps.signing-check.outputs.available == 'true'
         run: xcodegen generate --spec project.yml --project .
+      - name: Build unsigned app for community distribution
+        if: steps.signing-check.outputs.available != 'true'
+        run: |
+          xcodebuild -project Shelf.xcodeproj -scheme Shelf -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/ShelfDerived" \
+            CODE_SIGNING_ALLOWED=NO build
+          APP_PATH="$RUNNER_TEMP/ShelfDerived/Build/Products/Release/Shelf.app"
+          test -d "$APP_PATH"
+          while IFS= read -r -d '' code_file; do
+            if file "$code_file" | grep -q 'Mach-O'; then
+              codesign --force --sign - "$code_file"
+            fi
+          done < <(find "$APP_PATH/Contents/Resources/PythonRuntime" -type f -print0)
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip"
+          Scripts/package-dmg.sh "$APP_PATH" "$RUNNER_TEMP/Shelf.dmg"
       - name: Import Developer ID certificate
         if: steps.signing-check.outputs.available == 'true'
         env:
@@ -103,11 +118,33 @@ jobs:
           spctl --assess --type execute --verbose "$APP_PATH"
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip"
           Scripts/package-dmg.sh "$APP_PATH" "$RUNNER_TEMP/Shelf.dmg"
-      - name: Attach notarized app to GitHub release
-        if: steps.signing-check.outputs.available == 'true'
+      - name: Publish app and checksum to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNED_RELEASE: ${{ steps.signing-check.outputs.available }}
         run: |
+          if [[ "$SIGNED_RELEASE" == true ]]; then
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          ## Shelf ${RELEASE_TAG#v}
+
+          This notarized macOS release includes the app's universal Python runtimes; Xcode and a separate Python installation are not required.
+
+          Verify the download with the SHA-256 checksum in \`Shelf.dmg.sha256\`.
+          EOF
+          else
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          ## Shelf ${RELEASE_TAG#v}
+
+          This self-contained macOS DMG includes the app's universal Python runtimes; Xcode and a separate Python installation are not required.
+
+          **Unsigned community build:** Apple Developer ID signing and notarization are not configured for this release. macOS Gatekeeper remains enabled and may block the first launch. To approve it, try opening Shelf once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm. Only install software you trust. Do not remove the quarantine attribute or disable Gatekeeper.
+
+          Verify the download with the SHA-256 checksum in \`Shelf.dmg.sha256\`.
+          EOF
+          fi
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --generate-notes
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
           gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip" "$RUNNER_TEMP/Shelf.dmg" --repo "$GITHUB_REPOSITORY" --clobber
+          shasum -a 256 "$RUNNER_TEMP/Shelf.dmg" | awk '{print $1 "  Shelf.dmg"}' > "$RUNNER_TEMP/Shelf.dmg.sha256"
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf.dmg.sha256" --repo "$GITHUB_REPOSITORY" --clobber
