@@ -123,8 +123,8 @@ else
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.1.41</string>
-<key>CFBundleVersion</key><string>42</string>
+<key>CFBundleShortVersionString</key><string>0.1.42</string>
+<key>CFBundleVersion</key><string>43</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

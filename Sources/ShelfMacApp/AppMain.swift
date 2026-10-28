@@ -602,7 +602,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var components=URLComponents(string:"https://openlibrary.org/search.json")
             components?.queryItems=[URLQueryItem(name:"title",value:title),URLQueryItem(name:"limit",value:"10"),URLQueryItem(name:"fields",value:"cover_i,title,author_name")]
             guard let searchURL=components?.url else { return }
-            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.1.41 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.1.42 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var responseData:Data?,status=0
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 status=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -655,7 +655,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let source else { return }
             if let coverPath=source["coverPath"] as? String,!coverPath.isEmpty,
                let image=CGImageSourceCreateWithURL(URL(fileURLWithPath:coverPath) as CFURL,nil),CGImageSourceGetCount(image)>0 { return }
-            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.1.41 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.1.42 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var downloaded:Data?,statusCode=0,mimeType=""
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 statusCode=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -2143,32 +2143,70 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func copyLogsToClipboard() {
+        notify("Collecting recent log and error files…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
             let directory=URL(fileURLWithPath:self.logsPath,isDirectory:true),fm=FileManager.default
-            let files=(try? fm.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.contentModificationDateKey],options:[.skipsHiddenFiles]))?.filter{url in
-                let name=url.lastPathComponent.lowercased()
-                return name.hasSuffix(".log") || name.range(of:#"\.log\.\d+$"#,options:.regularExpression) != nil || [".err",".stderr",".stdout"].contains(where:name.hasSuffix)
-            }.sorted{
-                let a=(try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let b=(try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return a>b
-            } ?? []
-            var sections=[String](),remaining=100*1024*1024
-            let cutoff=Date().addingTimeInterval(-90*86400)
-            for file in files {
-                let modified=(try? file.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                guard modified>=cutoff,remaining>0,let data=try? Data(contentsOf:file),!data.isEmpty else { continue }
-                guard data.count<=remaining else { sections.append("===== \(file.lastPathComponent) · omitted because the 100 MB clipboard safety limit was reached =====");continue }
-                sections.append("===== \(file.lastPathComponent) · full log · updated \(DateFormatter.localizedString(from:modified,dateStyle:.medium,timeStyle:.short)) =====\n\(self.redact(String(decoding:data,as:UTF8.self)))")
-                remaining -= data.count
+            do {
+                let files=try fm.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.contentModificationDateKey],options:[.skipsHiddenFiles]).filter{url in
+                    let name=url.lastPathComponent.lowercased()
+                    return name.hasSuffix(".log") || name.range(of:#"\.log\.\d+$"#,options:.regularExpression) != nil || [".err",".stderr",".stdout"].contains(where:name.hasSuffix)
+                }.sorted{
+                    let a=(try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let b=(try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return a>b
+                }
+                var sections=[String](),remaining=100*1024*1024
+                let cutoff=Date().addingTimeInterval(-90*86400)
+                for file in files {
+                    let modified=(try? file.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    guard modified>=cutoff,remaining>0,let data=try? Data(contentsOf:file),!data.isEmpty else { continue }
+                    guard data.count<=remaining else { sections.append("===== \(file.lastPathComponent) · omitted because the 100 MB clipboard safety limit was reached =====");continue }
+                    sections.append("===== \(file.lastPathComponent) · full log · updated \(DateFormatter.localizedString(from:modified,dateStyle:.medium,timeStyle:.short)) =====\n\(self.redact(String(decoding:data,as:UTF8.self)))")
+                    remaining -= data.count
+                }
+                guard !sections.isEmpty else {
+                    DispatchQueue.main.async { self.send("logsCopied",["ok":false,"message":"No recent log files were found. Your clipboard was left unchanged."]) }
+                    return
+                }
+                let heading="Shelf logs and errors · \(DateFormatter.localizedString(from:Date(),dateStyle:.medium,timeStyle:.medium)) · \(TimeZone.current.identifier)\nFull contents of local log and error files updated in the last 90 days are included, up to 100 MB. Credentials and tokens are redacted.\n"
+                let output=heading+sections.joined(separator:"\n\n"),bytes=output.utf8.count
+                DispatchQueue.main.async {
+                    let pasteboard=NSPasteboard.general
+                    pasteboard.clearContents()
+                    if pasteboard.setString(output,forType:.string) {
+                        self.send("logsCopied",["ok":true,"message":"Copied \(sections.count) log files (\(ByteCountFormatter.string(fromByteCount:Int64(bytes),countStyle:.file))). Paste them wherever you need."])
+                    } else {
+                        DispatchQueue.global(qos:.utility).async {
+                            let copied=self.copyUsingPBcopy(output)
+                            DispatchQueue.main.async {
+                                self.send("logsCopied",["ok":copied,"message":copied ? "Copied \(sections.count) log files (\(ByteCountFormatter.string(fromByteCount:Int64(bytes),countStyle:.file))) using the macOS clipboard helper." : "macOS rejected the clipboard write. Try again or use Export diagnostics."])
+                            }
+                        }
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async { self.send("logsCopied",["ok":false,"message":"Could not read the log folder: \(error.localizedDescription)"]) }
             }
-            let heading="Shelf logs and errors · \(DateFormatter.localizedString(from:Date(),dateStyle:.medium,timeStyle:.medium)) · \(TimeZone.current.identifier)\nFull contents of local log and error files updated in the last 90 days are included, up to 100 MB. Credentials and tokens are redacted.\n"
-            let output=heading+(sections.isEmpty ? "No recent local log files were found.\n" : sections.joined(separator:"\n\n"))
-            DispatchQueue.main.async {
-                NSPasteboard.general.clearContents();NSPasteboard.general.setString(output,forType:.string)
-                self.notify("Logs and errors copied to clipboard · \(sections.count) files")
-            }
+        }
+    }
+
+    private func copyUsingPBcopy(_ text:String) -> Bool {
+        let process=Process(),input=Pipe()
+        process.executableURL=URL(fileURLWithPath:"/usr/bin/pbcopy")
+        process.standardInput=input
+        process.standardOutput=FileHandle.nullDevice
+        process.standardError=FileHandle.nullDevice
+        do {
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf:Data(text.utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+            return process.terminationStatus==0
+        } catch {
+            try? input.fileHandleForWriting.close()
+            if process.isRunning { process.terminate() }
+            return false
         }
     }
 
