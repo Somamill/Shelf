@@ -25,8 +25,8 @@ jobs:
         run: brew install xcodegen
       - name: Prepare bundled universal Python runtime
         run: Scripts/download-python-runtime.sh
-      - name: Build shared Swift package
-        run: swift build
+      - name: Test shared Swift package
+        run: swift test --scratch-path "$RUNNER_TEMP/ShelfSwiftTests"
       - name: Validate scripts and dashboard JavaScript
         run: |
           python3 -m py_compile Sources/ShelfCore/Tools/*.py

@@ -17,13 +17,13 @@ cask "shelf" do
 
   app "Shelf.app"
 
-  caveats do
-    unsigned_accessibility
-  end
-
   zap trash: [
     "~/Library/Application Support/Shelf",
     "~/Library/Preferences/app.shelf.dashboard.plist",
     "~/Library/Saved Application State/app.shelf.dashboard.savedState",
   ]
+
+  caveats do
+    unsigned_accessibility
+  end
 end

@@ -1,3 +1,8 @@
+## 0.1.37
+
+- Fix Homebrew tap instructions for the Shelf repository name and align the cask stanza order with Homebrew's current style rules.
+- Add focused shared setup-model tests and run them in CI so `swift test` validates the package instead of failing with no test target.
+
 ## 0.1.36
 
 - Publish a self-contained community DMG when Apple Developer signing credentials are unavailable, with the same notarized path retained for later.

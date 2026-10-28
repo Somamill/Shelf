@@ -6,7 +6,7 @@
   <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
 </p>
 
-> Current version: **0.1.36** · macOS · MIT licensed
+> Current version: **0.1.37** · macOS · MIT licensed
 
 ## What Shelf does
 
@@ -32,7 +32,9 @@ These showcase images use illustrative sample books and connection states. They 
 Download the latest [Shelf DMG](https://github.com/Somamill/Shelf/releases/latest) and drag Shelf into Applications. Releases are self-contained and do not require Xcode, Command Line Tools, or a separate Python installation. Until Apple Developer signing is available, the DMG is an unsigned community build. If macOS blocks its first launch, open Shelf once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm. This approves Shelf while leaving Gatekeeper enabled. See [Apple's instructions](https://support.apple.com/en-nz/102445) and check the release's SHA-256 checksum before installing. Homebrew users can install it with:
 
 ```sh
-brew install --cask Somamill/Shelf/shelf
+brew tap somamill/shelf https://github.com/Somamill/Shelf.git
+brew trust --cask somamill/shelf/shelf
+brew install --cask somamill/shelf/shelf
 ```
 
 The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
