@@ -35,7 +35,7 @@ Download the latest notarized [Shelf DMG](https://github.com/Somamill/Shelf/rele
 brew install --cask Somamill/Shelf/shelf
 ```
 
-The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
+The downloaded app runs without Xcode, Command Line Tools, or a separate Python installation. The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
 
 ### Build from source
 

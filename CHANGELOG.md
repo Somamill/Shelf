@@ -4,6 +4,7 @@
 - Added a read-only library health summary for missing covers, authors, formats, and possible duplicate records.
 - Added opt-in Calibre full-text search with low-resource indexing controls and bounded command time.
 - Added DMG packaging and a Homebrew cask for installing signed releases.
+- Bundled universal Python runtimes so installed copies do not require Xcode, Command Line Tools, or a separate Python install.
 
 ## 0.1.33
 

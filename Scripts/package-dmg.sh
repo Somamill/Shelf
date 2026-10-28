@@ -12,7 +12,14 @@ fi
 mkdir -p "$(dirname "$OUTPUT")"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/shelf-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
- ditto "$APP_PATH" "$STAGE/Shelf.app"
+ditto "$APP_PATH" "$STAGE/Shelf.app"
+PYTHON_ROOT="$STAGE/Shelf.app/Contents/Resources/PythonRuntime"
+if [[ ! -x "$PYTHON_ROOT/arm64/python/bin/python3" || ! -x "$PYTHON_ROOT/x86_64/python/bin/python3" ]]; then
+  "$ROOT/Scripts/download-python-runtime.sh" "$PYTHON_ROOT"
+  # This fallback is for locally built preview DMGs. Public release builds
+  # embed and Developer ID sign the runtimes before packaging.
+  codesign --force --deep --sign - "$STAGE/Shelf.app"
+fi
 ln -s /Applications "$STAGE/Applications"
 cat > "$STAGE/Install Shelf.txt" <<'TXT'
 Install Shelf

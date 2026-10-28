@@ -8,6 +8,8 @@ build/
 dist/
 .build/
 DerivedData/
+Resources/PythonRuntime/arm64/
+Resources/PythonRuntime/x86_64/
 *.xcuserstate
 xcuserdata/
 

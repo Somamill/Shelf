@@ -79,6 +79,7 @@ os.chmod(path, 0o600)
 PY
 
 PROJECT_FILE="$PROJECT_ROOT/Shelf.xcodeproj/project.pbxproj"
+"$PROJECT_ROOT/Scripts/download-python-runtime.sh"
 if [[ ! -f "$PROJECT_FILE" || "$PROJECT_ROOT/project.yml" -nt "$PROJECT_FILE" ]]; then
   if ! command -v xcodegen >/dev/null 2>&1; then
     echo "Install XcodeGen to regenerate the project after editing project.yml." >&2
@@ -111,6 +112,7 @@ else
   cp "$PROJECT_ROOT/Resources/Dashboard/index.html" "$PROJECT_ROOT/Resources/Dashboard/style.css" \
     "$PROJECT_ROOT/Resources/Dashboard/app.js" "$PROJECT_ROOT/Resources/Icons/AppIcon.icns" \
     "$PROJECT_ROOT/Sources/ShelfCore/Tools/"*.py "$PROJECT_ROOT/Config/config.example.json" "$RESOURCES/"
+  ditto "$PROJECT_ROOT/Resources/PythonRuntime" "$RESOURCES/PythonRuntime"
   cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

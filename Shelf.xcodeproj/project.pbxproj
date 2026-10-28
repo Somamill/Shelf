@@ -23,6 +23,7 @@
 		BDE45900DBB68F6ECA8E90E7 /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E2AEAFC476556B6591566B /* AppMain.swift */; };
 		C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 15975E75F118DA6A5F9DDC22 /* AppIcon.icns */; };
 		CA04118D7DFF0280FFF26873 /* app.js in Resources */ = {isa = PBXBuildFile; fileRef = 9096715045380B07144496A7 /* app.js */; };
+		DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */ = {isa = PBXBuildFile; fileRef = 32B8DD740E9D64ABA17E06E1 /* PythonRuntime */; };
 		ED671E2BE235BDD21A18A8D0 /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 5E4687CC9A77B219982C2592 /* index.html */; };
 		ED741A475C850F11E42A559E /* kosync_calibre_bridge.py in Resources */ = {isa = PBXBuildFile; fileRef = B3AF4E815C2B4AF0A1B40186 /* kosync_calibre_bridge.py */; };
 /* End PBXBuildFile section */
@@ -32,6 +33,7 @@
 		15975E75F118DA6A5F9DDC22 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		20096C905A07887BF87BAB46 /* calibre_fts.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = calibre_fts.py; sourceTree = "<group>"; };
 		2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_book_actions.py; sourceTree = "<group>"; };
+		32B8DD740E9D64ABA17E06E1 /* PythonRuntime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PythonRuntime; path = Resources/PythonRuntime; sourceTree = SOURCE_ROOT; };
 		33E2AEAFC476556B6591566B /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
 		5E4687CC9A77B219982C2592 /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		650147434549546734006E3B /* boox_rotation.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_rotation.py; sourceTree = "<group>"; };
@@ -118,6 +120,7 @@
 			children = (
 				5C2AE7411A96E0DDA861916C /* Dashboard */,
 				1A10CE5BD9604E26DA10208A /* Icons */,
+				32B8DD740E9D64ABA17E06E1 /* PythonRuntime */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -228,6 +231,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */,
+				DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */,
 				CA04118D7DFF0280FFF26873 /* app.js in Resources */,
 				2CEECEF5579850629BE85585 /* apple_books.py in Resources */,
 				5F0B527A57CBABFAF1644923 /* bookshelf.py in Resources */,

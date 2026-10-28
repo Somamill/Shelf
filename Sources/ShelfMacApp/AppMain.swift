@@ -143,6 +143,21 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var scriptsPath: String { configuration.path("scripts", fallback: "\(base)/scripts") }
     private var logsPath: String { configuration.path("logs", fallback: "\(base)/logs") }
     private var importPath: String { configuration.path("import", fallback: "\(home)/Books/Calibre Import") }
+    private var pythonExecutable: String {
+        let architecture = Self.run("/usr/bin/uname", ["-m"]).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let runtimeArch = architecture == "arm64" ? "arm64" : "x86_64"
+        if let resources = Bundle.main.resourceURL {
+            let bundled = resources.appendingPathComponent("PythonRuntime/\(runtimeArch)/python/bin/python3").path
+            if FileManager.default.isExecutableFile(atPath: bundled) { return bundled }
+        }
+        // Source builds may use an already-installed interpreter. Never invoke
+        // Apple's command-line-tools stub on a user installation; it can open
+        // an Xcode/Command Line Tools installation prompt.
+        for candidate in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/Library/Developer/CommandLineTools/usr/bin/python3", "/Applications/Xcode.app/Contents/Developer/usr/bin/python3"] {
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return "/usr/bin/false"
+    }
     private var detectedLibraryPath: String? {
         [libraryPath, "\(home)/Books/Calibre Library", "\(home)/Documents/Calibre Library", "\(home)/Calibre Library"]
             .first { FileManager.default.fileExists(atPath: URL(fileURLWithPath: $0).appendingPathComponent("metadata.db").path) }
@@ -520,7 +535,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let script=Bundle.main.resourceURL?.appendingPathComponent("bookshelf.py").path ?? "\(home)/Shelf/bookshelf.py"
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script])
+            let result=Self.run(self.pythonExecutable,[script])
             guard result.code == 0,
                   let bytes=result.output.data(using:.utf8),
                   var payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any] else {
@@ -553,7 +568,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let script = Bundle.main.resourceURL?.appendingPathComponent("calibre_fts.py").path ?? "\(projectPath)/calibre_fts.py"
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
-            let result = Self.run("/usr/bin/python3", [script, action] + (action == "search" ? [query] : []))
+            let result = Self.run(self.pythonExecutable, [script, action] + (action == "search" ? [query] : []))
             let payload = result.output.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
                 ?? ["ok": false, "message": String(result.output.suffix(1200))]
             DispatchQueue.main.async { self.send("fullTextResult", payload) }
@@ -677,7 +692,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 DispatchQueue.main.async { self.notify("Could not safely read the live Calibre catalog. No Apple Books entries were added.") }
                 return
             }
-            let existingResult=Self.run("/usr/bin/python3",[Bundle.main.resourceURL?.appendingPathComponent("bookshelf.py").path ?? ""])
+            let existingResult=Self.run(self.pythonExecutable,[Bundle.main.resourceURL?.appendingPathComponent("bookshelf.py").path ?? ""])
             let existingBooks=(try? JSONSerialization.jsonObject(with:Data(existingResult.output.utf8)) as? [String:Any])?["allBooks"] as? [[String:Any]] ?? []
             func normalized(_ value:String)->String { value.folding(options:[.caseInsensitive,.diacriticInsensitive],locale:.current).split(whereSeparator:{$0.isWhitespace}).joined(separator:" ") }
             var existing=Set(existingBooks.compactMap { book -> String? in
@@ -709,7 +724,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard bookId > 0, let script=Bundle.main.resourceURL?.appendingPathComponent("open_library_book.py").path else { return }
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script,String(bookId)])
+            let result=Self.run(self.pythonExecutable,[script,String(bookId)])
             guard result.code == 0,
                   let payload=try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any],
                   let path=payload["path"] as? String else {
@@ -740,9 +755,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         } catch { notify("Could not save the progress match: \(error.localizedDescription)"); return }
         let bridgeScript=bridgeScriptPath
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let result=Self.run("/usr/bin/python3",[bridgeScript])
+            guard let self else { return }
+            let result=Self.run(self.pythonExecutable,[bridgeScript])
             DispatchQueue.main.async {
-                guard let self else { return }
                 if result.code == 0 {
                     self.notify("Progress linked to Calibre. Refreshing your cover shelf…")
                     self.loadBooks()
@@ -759,7 +774,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let script=Bundle.main.resourceURL?.appendingPathComponent("reader_book.py").path ?? "\(home)/Shelf/reader_book.py"
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script,String(bookId)])
+            let result=Self.run(self.pythonExecutable,[script,String(bookId)])
             guard result.code == 0, let bytes=result.output.data(using:.utf8),
                   let payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any],
                   let document=payload["document"] as? String,
@@ -792,7 +807,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let script=Bundle.main.resourceURL?.appendingPathComponent("shelf_book_actions.py").path ?? "\(home)/Shelf/shelf_book_actions.py"
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script,String(bookId),finished ? "finished" : "reading"])
+            let result=Self.run(self.pythonExecutable,[script,String(bookId),finished ? "finished" : "reading"])
             DispatchQueue.main.async {
                 guard result.code == 0 else {
                     self.notify("Could not update this book’s finished status.")
@@ -1146,7 +1161,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
         DispatchQueue.global(qos:.utility).async {
-            let result=Self.run("/usr/bin/python3",[helper],input:json)
+            let result=Self.run(self.pythonExecutable,[helper],input:json)
             let ok=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["ok"] as? Bool == true
             completion(ok)
         }
@@ -1162,10 +1177,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         notify("Checking the Readwise access token…")
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let result=Self.run("/usr/bin/python3",[helper],input:json)
+            guard let self else { return }
+            let result=Self.run(self.pythonExecutable,[helper],input:json)
             let response=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8))) as? [String:Any] ?? [:]
             DispatchQueue.main.async {
-                guard let self else { return }
                 guard result.code == 0, response["ok"] as? Bool == true else {
                     self.notify(response["error"] as? String ?? "Readwise could not validate this token."); return
                 }
@@ -1214,7 +1229,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         notify("Syncing Readwise Reader with matching Calibre books…")
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
-            let result=Self.run("/usr/bin/python3",[script],input:json)
+            let result=Self.run(self.pythonExecutable,[script],input:json)
             guard let outputData=result.output.data(using:.utf8),
                   let response=try? JSONSerialization.jsonObject(with:outputData) as? [String:Any],
                   response["ok"] as? Bool == true else {
@@ -1235,7 +1250,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let matched=(response["matched"] as? Int) ?? 0
             let savedHighlights=remote.values.reduce(0){$0+$1.count}
             let failures=(response["syncFailures"] as? Int) ?? 0
-            if pushed>0 { _=Self.run("/usr/bin/python3",[self.bridgeScriptPath]) }
+            if pushed>0 { _=Self.run(self.pythonExecutable,[self.bridgeScriptPath]) }
             DispatchQueue.main.async {
                 self.loadBooks()
                 if let active=self.activeReader,let bookId=(active["bookId"] as? NSNumber)?.intValue,
@@ -1655,7 +1670,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "restart-kosync":return (dockerPath,["restart",configuration.value("containers.kosync",fallback:"kosync")],"KOReader Sync restart")
         case "restart-crosspoint":return (dockerPath,["restart",configuration.value("containers.crosspoint",fallback:"crosspoint-sync")],"CrossPoint Sync restart")
         case "run-import":return (launch,["kickstart","-k","\(domain)/\(agent("importer",fallback:"app.shelf.calibre-importer"))"],"E-book import")
-        case "run-bridge":return ("/usr/bin/python3",[bridgeScriptPath],"Reading-progress bridge")
+        case "run-bridge":return (pythonExecutable,[bridgeScriptPath],"Reading-progress bridge")
         case "backup-now":return ("/bin/bash",["\(scriptsPath)/calibre-restic-backup.sh"],"Library backup")
         case "run-japanese-audit":return (launch,["kickstart","-k","\(domain)/\(agent("japanese",fallback:"app.shelf.japanese-audit"))"],"Japanese EPUB audit")
         case "run-full-scan":return ("/bin/bash",["\(scriptsPath)/calibre-malware-full-scan.sh"],"Full-library safety scan")
@@ -1873,7 +1888,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let json=try JSONSerialization.data(withJSONObject:values)
         guard let input=String(data:json,encoding:.utf8) else { throw NSError(domain:"BooxSettings",code:1,userInfo:[NSLocalizedDescriptionKey:"Could not encode setup values."]) }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
-        let merged=Self.run("/usr/bin/python3",[helper,source.path,output.path],input:input)
+        let merged=Self.run(self.pythonExecutable,[helper,source.path,output.path],input:input)
         guard merged.code == 0 else { try? fm.removeItem(at:root); throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
         // KOReader stores the active plugin files in settings/, but its older
         // monolithic reader configuration lives beside that directory.
@@ -1936,7 +1951,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let values=try booxSettingsValues()
         guard let json=String(data:try JSONSerialization.data(withJSONObject:values),encoding:.utf8) else { throw NSError(domain:"BooxSettings",code:8,userInfo:[NSLocalizedDescriptionKey:"Could not encode settings."]) }
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
-        let merged=Self.run("/usr/bin/python3",[helper,existing.path,output.path],input:json)
+        let merged=Self.run(self.pythonExecutable,[helper,existing.path,output.path],input:json)
         guard merged.code == 0 else { throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
         let stamp=ISO8601DateFormatter().string(from:Date()).replacingOccurrences(of:":",with:"-")
         let backup="\(settingsPath)/.calibre-stack-backup-\(stamp)"
@@ -1980,7 +1995,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
         }
         let rotationHelper=Bundle.main.resourceURL?.appendingPathComponent("boox_rotation.py").path ?? "\(home)/Shelf/boox_rotation.py"
-        let rotation=Self.run("/usr/bin/python3",[rotationHelper,adb,serial])
+        let rotation=Self.run(self.pythonExecutable,[rotationHelper,adb,serial])
         guard rotation.code == 0 else {
             throw NSError(domain:"BooxSettings",code:14,userInfo:[NSLocalizedDescriptionKey:"Calibre OPDS and KOReader Sync were transferred successfully, but automatic rotation could not be enabled: \(rotation.output.trimmingCharacters(in:.whitespacesAndNewlines).suffix(220))"])
         }
@@ -2344,6 +2359,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func md5(_ value:String)->String { let digest=Insecure.MD5.hash(data:Data(value.utf8)); return digest.map{String(format:"%02x",$0)}.joined() }
 
     private static func run(_ executable:String,_ args:[String],input:String?=nil)->(code:Int32,output:String) {
+        if executable == "/usr/bin/false" {
+            return (127, "Shelf's Python runtime is missing. Reinstall Shelf from its complete DMG.")
+        }
         let p=Process(); p.executableURL=URL(fileURLWithPath:executable); p.arguments=args
         let out=Pipe(),err=Pipe(); p.standardOutput=out;p.standardError=err
         var inputPipe:Pipe?

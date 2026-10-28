@@ -25,6 +25,9 @@ targets:
         buildPhase: resources
       - path: Resources/Icons/AppIcon.icns
         buildPhase: resources
+      - path: Resources/PythonRuntime
+        type: folder
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/bookshelf.py
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/calibre_fts.py

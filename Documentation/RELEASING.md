@@ -1,6 +1,6 @@
 # Releasing a signed macOS build
 
-Shelf 0.1.0 currently publishes source code only. A downloadable app for other Macs needs a Developer ID Application certificate and Apple notarization. Apple requires Developer ID signing, Hardened Runtime, and a notarization ticket for this distribution path. Unsigned DMGs are useful for local testing but macOS may warn or block them, so Homebrew and public releases use only notarized artifacts.
+The repository includes the Shelf source and release pipeline. Publishing a downloadable app for other Macs needs a Developer ID Application certificate and Apple notarization. Apple requires Developer ID signing, Hardened Runtime, and a notarization ticket for this distribution path. Unsigned DMGs are useful for local testing but macOS may warn or block them, so Homebrew and public releases use only notarized artifacts.
 
 ## One-time GitHub setup
 
@@ -22,4 +22,4 @@ For the certificate and notarization requirements, see Apple's [Developer ID cer
 
 ## Installers and Homebrew
 
-The repository includes `Scripts/package-dmg.sh` for producing a standard drag-to-Applications DMG from a built app bundle, and `Casks/shelf.rb` for Homebrew installation. The Homebrew cask intentionally tracks only the latest signed release. Configure the five Apple secrets above before publishing a release so the DMG can be notarized.
+The repository includes `Scripts/download-python-runtime.sh` to fetch and verify universal arm64/x86_64 Python runtimes, `Scripts/package-dmg.sh` for producing a standard drag-to-Applications DMG, and `Casks/shelf.rb` for Homebrew installation. The packaged app is self-contained and does not ask users to install developer tools or Python. The Homebrew cask intentionally tracks only the latest signed release. Configure the five Apple secrets above before publishing a release so the DMG can be notarized.
