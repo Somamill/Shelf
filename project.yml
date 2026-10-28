@@ -52,6 +52,22 @@ targets:
         buildPhase: resources
       - path: Config/config.example.json
         buildPhase: resources
+    postBuildScripts:
+      - name: Ensure Dock icon metadata
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/AppIcon.icns
+        outputFiles:
+          - $(DERIVED_FILE_DIR)/ShelfIconMetadata.stamp
+        script: |
+          INFO_PLIST="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          if /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO_PLIST" >/dev/null 2>&1; then
+            /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile AppIcon.icns' "$INFO_PLIST"
+          else
+            /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string AppIcon.icns' "$INFO_PLIST"
+          fi
+          test -s "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/AppIcon.icns"
+          touch "$SCRIPT_OUTPUT_FILE_0"
     dependencies:
       - package: ShelfCore
         product: ShelfCore
@@ -59,8 +75,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.39
-        CURRENT_PROJECT_VERSION: 40
+        MARKETING_VERSION: 0.1.40
+        CURRENT_PROJECT_VERSION: 41
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES

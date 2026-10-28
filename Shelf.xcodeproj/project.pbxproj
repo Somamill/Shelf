@@ -179,6 +179,7 @@
 				E647543DFA06B802A295C593 /* Sources */,
 				8A06BDA5BCF566E678D73B1D /* Resources */,
 				875010B4727E585F35DBF312 /* Frameworks */,
+				6DDF8BD6F8400466C3F37100 /* Ensure Dock icon metadata */,
 			);
 			buildRules = (
 			);
@@ -251,6 +252,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6DDF8BD6F8400466C3F37100 /* Ensure Dock icon metadata */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/AppIcon.icns",
+			);
+			name = "Ensure Dock icon metadata";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/ShelfIconMetadata.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "INFO_PLIST=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\nif /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' \"$INFO_PLIST\" >/dev/null 2>&1; then\n  /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile AppIcon.icns' \"$INFO_PLIST\"\nelse\n  /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string AppIcon.icns' \"$INFO_PLIST\"\nfi\ntest -s \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/AppIcon.icns\"\ntouch \"$SCRIPT_OUTPUT_FILE_0\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E647543DFA06B802A295C593 /* Sources */ = {
@@ -389,7 +414,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -402,7 +427,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.39;
+				MARKETING_VERSION = 0.1.40;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
@@ -416,7 +441,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -429,7 +454,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.39;
+				MARKETING_VERSION = 0.1.40;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
