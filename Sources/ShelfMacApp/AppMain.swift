@@ -143,6 +143,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var scriptsPath: String { configuration.path("scripts", fallback: "\(base)/scripts") }
     private var logsPath: String { configuration.path("logs", fallback: "\(base)/logs") }
     private var importPath: String { configuration.path("import", fallback: "\(home)/Books/Calibre Import") }
+    private var detectedLibraryPath: String? {
+        [libraryPath, "\(home)/Books/Calibre Library", "\(home)/Documents/Calibre Library", "\(home)/Calibre Library"]
+            .first { FileManager.default.fileExists(atPath: URL(fileURLWithPath: $0).appendingPathComponent("metadata.db").path) }
+    }
     private var projectPath: String { configuration.path("project", fallback: "~/Shelf") }
     private var bridgeScriptPath: String { configuration.path("bridgeScript", fallback: Bundle.main.resourceURL?.appendingPathComponent("kosync_calibre_bridge.py").path ?? "\(projectPath)/kosync_calibre_bridge.py") }
     private var username: String { configuration.value("account.username", fallback: "reader") }
@@ -318,6 +322,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard let body=message.body as? [String:Any], let type=body["type"] as? String else { return }
         switch type {
         case "loadSetup": loadSetup()
+        case "autoSetup": autoSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
         case "chooseSetupFolder": chooseSetupFolder(body["role"] as? String ?? "library")
         case "appearance":
@@ -347,6 +352,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 notify("BookPlayer runs on your iPhone. Its synced reading status appears here when Hardcover is connected.")
             }
         case "loadBooks": loadBooks()
+        case "calibreFullText": runCalibreFullText(body["action"] as? String ?? "status", query: body["query"] as? String ?? "")
         case "loadBookCover": if let bookId=body["bookId"] as? Int { loadBookCover(bookId) }
         case "loadAppleBooks": loadAppleBooks()
         case "importAppleBooksCatalog": importAppleBooksCatalog()
@@ -383,6 +389,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let crosspoint=(services["crosspointApi"] as? String).flatMap{$0.isEmpty ? nil : $0} ?? "http://127.0.0.1:17303"
         send("setupLoaded", [
             "setupCompleted":configuration.bool("setupCompleted"),
+            "libraryDetected": detectedLibraryPath != nil,
+            "detectedLibraryPath": detectedLibraryPath ?? "",
             "cloudProvider":configuration.value("cloudProvider",fallback:"icloud"),
             "libraryPath":libraryPath,"importPath":importPath,"username":username,
             "devices":configuration.strings("devices"),
@@ -392,6 +400,29 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             "kosyncUrl":sync,
             "crosspointUrl":crosspoint
         ])
+    }
+
+    /// Finish the common first-run path with local defaults; optional services can be linked later.
+    private func autoSetup() {
+        guard let detected = detectedLibraryPath else {
+            send("setupAutoResult", ["ok": false, "message": "Shelf couldn’t find a Calibre library. Choose the folder containing metadata.db, then use Finish setup."])
+            return
+        }
+        do {
+            let incoming = URL(fileURLWithPath: importPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
+            try configuration.set("paths.library", detected)
+            try configuration.set("paths.import", incoming.path)
+            try configuration.set("setupCompleted", true)
+            if configuration.value("account.username", fallback: "").isEmpty {
+                try configuration.set("account.username", "reader")
+            }
+            send("setupAutoResult", ["ok": true, "message": "Setup finished. Shelf found your Calibre library and prepared an incoming-books folder. You can connect optional services later."])
+            loadSetup()
+            refresh()
+        } catch {
+            send("setupAutoResult", ["ok": false, "message": "Shelf couldn’t finish setup: \(error.localizedDescription)"])
+        }
     }
 
     private func saveSetup(_ form:[String:Any]) {
@@ -510,6 +541,22 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             })
             self.coverSourceLock.unlock()
             DispatchQueue.main.async { self.send("bookshelfData",payload) }
+        }
+    }
+
+    private func runCalibreFullText(_ action: String, query: String) {
+        guard ["status", "enable", "disable", "search"].contains(action) else { return }
+        guard action != "search" || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            send("fullTextResult", ["ok": false, "message": "Enter words to search for."])
+            return
+        }
+        let script = Bundle.main.resourceURL?.appendingPathComponent("calibre_fts.py").path ?? "\(projectPath)/calibre_fts.py"
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let result = Self.run("/usr/bin/python3", [script, action] + (action == "search" ? [query] : []))
+            let payload = result.output.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                ?? ["ok": false, "message": String(result.output.suffix(1200))]
+            DispatchQueue.main.async { self.send("fullTextResult", payload) }
         }
     }
 

@@ -90,6 +90,7 @@ jobs:
           codesign --verify --deep --strict "$APP_PATH"
           spctl --assess --type execute --verbose "$APP_PATH"
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip"
+          Scripts/package-dmg.sh "$APP_PATH" "$RUNNER_TEMP/Shelf.dmg"
       - name: Attach notarized app to GitHub release
         if: steps.signing-check.outputs.available == 'true'
         env:
@@ -97,4 +98,4 @@ jobs:
         run: |
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --generate-notes
-          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip" "$RUNNER_TEMP/Shelf.dmg" --repo "$GITHUB_REPOSITORY" --clobber

@@ -6,12 +6,12 @@
   <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
 </p>
 
-> Current version: **0.1.33** · macOS · MIT licensed
+> Current version: **0.1.34** · macOS · MIT licensed
 
 ## What Shelf does
 
 - **One shelf across sources.** Browse Calibre titles and formats alongside reading records from Apple Books, Hardcover, and connected readers. Matching uses title and author evidence so different editions can share one shelf entry.
-- **Covers and metadata.** Loads embedded Calibre covers, then tries the public Open Library cover catalog for missing artwork. If no reliable cover is available, Shelf shows a readable title card instead of an empty image box.
+- **Covers and metadata.** Loads embedded Calibre covers, then tries the public Open Library cover catalog for missing artwork. If no reliable cover is available, Shelf shows a readable title card instead of an empty image box. A read-only library health summary points out missing covers, authors, formats, and likely duplicate records. Optional full-text search uses Calibre’s slow indexing mode and only starts after you enable it.
 - **Read and track.** Open EPUBs in the built-in paginated reader, keep progress and highlights, and view finish status and reading statistics.
 - **Sync services.** Check Calibre, KOReader Sync, CrossPoint, Hardcover, Readwise, and Readwise Reader connections from the dashboard.
 - **Device setup.** Configure supported KOReader/CrossPoint readers and see when a reader last sent progress. A disconnected reader can only upload after it reconnects to Wi-Fi.
@@ -21,11 +21,25 @@
 
 The public screenshot shows the library and import controls without exposing a personal book list or local network address.
 
-![Shelf library and import controls](Documentation/Screenshots/library.png)
+| Library and import | Current Shelf interface |
+| --- | --- |
+| ![Shelf library and import controls](Documentation/Screenshots/import-workflow.png) | ![Shelf home and book filters](Documentation/Screenshots/library.png) |
 
 ## Install and build
 
-Requirements: macOS, Xcode, Python 3, and a local Calibre library.
+### Install a release
+
+Download the latest notarized [Shelf DMG](https://github.com/Somamill/Shelf/releases/latest) and drag Shelf into Applications. Homebrew users can install the same signed release with:
+
+```sh
+brew install --cask Somamill/Shelf/shelf
+```
+
+The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
+
+### Build from source
+
+Requirements: macOS 14 or later, Xcode, Python 3, and a local Calibre library.
 
 ```sh
 git clone https://github.com/Somamill/Shelf.git
@@ -33,7 +47,7 @@ cd Shelf
 Scripts/build-and-install.sh
 ```
 
-Alternatively, open `Shelf.xcodeproj` in Xcode and build the `Shelf` scheme. Complete **Setup** on first launch and choose the Calibre library and incoming-book folder. Shelf does not require Homebrew or third-party Swift packages for its core features.
+To package a locally built app for testing, run `Scripts/package-dmg.sh /Applications/Shelf.app`. Public releases use Developer ID signing and Apple notarization; see [release setup](Documentation/RELEASING.md).
 
 ## Set up your reading sources
 

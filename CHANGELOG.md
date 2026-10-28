@@ -1,3 +1,10 @@
+## 0.1.34
+
+- Added a first-launch quick setup that detects common Calibre library locations and prepares the incoming-books folder automatically; optional services can be connected later.
+- Added a read-only library health summary for missing covers, authors, formats, and possible duplicate records.
+- Added opt-in Calibre full-text search with low-resource indexing controls and bounded command time.
+- Added DMG packaging and a Homebrew cask for installing signed releases.
+
 ## 0.1.33
 
 - Added resilient book-cover fallbacks: failed artwork no longer leaves blank cards, and missing covers are fetched lazily from Open Library with a small request queue.

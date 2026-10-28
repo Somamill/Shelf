@@ -27,6 +27,8 @@ targets:
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/bookshelf.py
         buildPhase: resources
+      - path: Sources/ShelfCore/Tools/calibre_fts.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/shelf_book_actions.py
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/reader_book.py
@@ -54,8 +56,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.33
-        CURRENT_PROJECT_VERSION: 34
+        MARKETING_VERSION: 0.1.34
+        CURRENT_PROJECT_VERSION: 35
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
