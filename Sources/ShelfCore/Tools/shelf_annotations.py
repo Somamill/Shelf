@@ -18,8 +18,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 DEFAULTS = {
     'sort': 'newest', 'view': 'list', 'color': 'yellow', 'suggestTags': True,
@@ -33,6 +34,7 @@ DEFAULTS = {
     'paused': [], 'importReadwise': True, 'importProgress': True,
     'rememberPerBook': False, 'restorePosition': True, 'defaultReader': 'shelf',
     'scheduledExport': False,
+    'readwiseAutoImport': True,
 }
 
 
@@ -54,6 +56,7 @@ class Library:
         CREATE TABLE IF NOT EXISTS conflicts(id TEXT PRIMARY KEY, highlight TEXT UNIQUE, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS collections(id TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS sync_state(provider TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS queue(id TEXT PRIMARY KEY, highlight TEXT NOT NULL, destination TEXT NOT NULL,
           status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0,
           message TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL, UNIQUE(highlight,destination));
@@ -125,6 +128,9 @@ class Library:
         value = {**old, 'id':old.get('id') or str(uuid.uuid4()), 'text':text(raw['text']),
                  'title':title,'author':author,'bookId':book_id,'source':source,'sourceId':provider,
                  'location':location,'sourceText':raw.get('sourceText',raw['text']),'sourceNote':text(raw.get('sourceNote',raw.get('note'))),'note':text(raw.get('note')), 'tags':self.tags(raw.get('tags',[])),
+                 'sourceBookId':text(raw.get('sourceBookId',old.get('sourceBookId','')),100),
+                 'sourceCategory':text(raw.get('sourceCategory',old.get('sourceCategory','')),100),
+                 'origin':text(raw.get('origin',old.get('origin','')),100),
                  'favorite':raw.get('favorite') is True, 'archived':raw.get('archived') is True,
                  'color':raw.get('color') if raw.get('color') in ('yellow','green','blue','pink') else self.settings()['color'], 'createdAt':int(raw.get('createdAt') or now()),
                  'updatedAt':now(), 'nextReview':max(0,int(raw.get('nextReview',0))), 'frequency':min(10,max(0,float(raw.get('frequency',1)))),
@@ -222,6 +228,126 @@ class Library:
         self.db.execute('DELETE FROM conflicts WHERE id=?',(key,)); self.commit()
 
     def queue(self): return [dict(r) for r in self.db.execute('SELECT * FROM queue ORDER BY updated DESC')]
+
+    def readwise_state(self):
+        row=self.db.execute("SELECT value FROM sync_state WHERE provider='readwise'").fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def save_readwise_state(self,state):
+        self.db.execute("INSERT OR REPLACE INTO sync_state VALUES ('readwise',?)",(json.dumps(state),))
+
+    def readwise_status(self):
+        state=self.readwise_state()
+        return {k:state[k] for k in ('lastSuccess','nextAt','message','inProgress','imported','processed','failures') if k in state}
+
+    def import_readwise(self,token,automatic=False):
+        """Commit one export page with its cursor; resume without re-uploading anything."""
+        if not token: raise ValueError('Connect Readwise once in Connections to import your library.')
+        if automatic and (not self.settings()['readwiseAutoImport'] or not self.settings()['importReadwise']): return {}
+        state=self.readwise_state()
+        fingerprint=hashlib.sha256(token.encode()).hexdigest()
+        if state.get('accountKey')!=fingerprint: state={'accountKey':fingerprint}
+        if now()<state.get('nextAt',0) and (automatic or state.get('failures',0)):
+            return {'readwiseWaiting':True}
+        if not state.get('inProgress'):
+            state.update(inProgress=True,startedAt=now(),imported=0,processed=0,cursor=None)
+        query={}
+        if state.get('lastSuccess'):
+            query['updatedAfter']=datetime.fromtimestamp(state['lastSuccess']-60,timezone.utc).isoformat()
+        if state.get('cursor'): query['pageCursor']=state['cursor']
+        query['includeDeleted']='true'
+        request=urllib.request.Request('https://readwise.io/api/v2/export/?'+urllib.parse.urlencode(query),headers={'Authorization':'Token '+token})
+        previous_counts=(state['imported'],state['processed'])
+        try:
+            with urllib.request.urlopen(request,timeout=30) as response:
+                content=response.read(20_000_001)
+                if len(content)>20_000_000: raise ValueError('Readwise page is too large')
+                page=json.loads(content)
+            if not isinstance(page,dict) or not isinstance(page.get('results'),list): raise ValueError('Invalid response')
+            cursor=page.get('nextPageCursor')
+            if cursor is not None and (not isinstance(cursor,str) or not cursor or cursor==state.get('cursor')):
+                raise ValueError('Invalid export cursor')
+            # No changes to highlights or cursor survive a malformed/failed page.
+            self.db.execute('SAVEPOINT readwise_page')
+            for book in page['results']:
+                if not isinstance(book,dict) or not book.get('user_book_id'):
+                    raise ValueError('Invalid book')
+                book_id=str(book['user_book_id'])
+                if book.get('is_deleted'):
+                    for item in self.items():
+                        if item['source']=='Readwise' and item.get('sourceBookId')==book_id: self.archive_readwise(item)
+                    continue
+                if not isinstance(book.get('highlights'),list): raise ValueError('Invalid highlights')
+                for highlight in book['highlights']:
+                    if not isinstance(highlight,dict) or not highlight.get('id'): raise ValueError('Invalid highlight')
+                    source_id=str(highlight['id'])
+                    identity=hashlib.sha256(json.dumps(['Readwise',source_id],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+                    prior=self.db.execute('SELECT value FROM highlights WHERE identity=?',(identity,)).fetchone()
+                    existing=json.loads(prior[0]) if prior else None
+                    if not existing and highlight.get('external_id'):
+                        # Upgrade an old Reader import only with an exact provider ID.
+                        legacy=[x for x in self.items() if x['source']=='Readwise Reader' and x['sourceId']==str(highlight['external_id'])]
+                        if len(legacy)==1:
+                            existing={**legacy[0],'source':'Readwise','sourceId':source_id,'sourceBookId':book_id}
+                            self.db.execute('UPDATE highlights SET identity=?,value=? WHERE id=?',
+                                            (identity,json.dumps(existing,ensure_ascii=False),existing['id']))
+                    if highlight.get('is_deleted'):
+                        if existing: self.archive_readwise(existing)
+                        continue
+                    if not compact(highlight.get('text')): raise ValueError('Empty highlight')
+                    def tags(rows):
+                        if not isinstance(rows,list): raise ValueError('Invalid tags')
+                        return [r.get('name','') if isinstance(r,dict) else str(r) for r in rows]
+                    raw={'source':'Readwise','sourceId':source_id,'sourceBookId':book_id,
+                         'sourceCategory':book.get('category',''),'origin':book.get('source',''),
+                         'title':book.get('title') or book.get('readable_title') or 'Untitled', 'author':book.get('author') or '',
+                         'text':highlight['text'],'note':highlight.get('note') or '',
+                         'tags':tags(book.get('book_tags') or [])+tags(highlight.get('tags') or []),
+                         'favorite':highlight.get('is_favorite') is True,'color':highlight.get('color'),
+                         'document':highlight.get('readwise_url') or 'https://readwise.io/open/'+urllib.parse.quote(source_id,safe=''),
+                         'chapter':str(highlight.get('location') or '')}
+                    date=highlight.get('highlighted_at') or highlight.get('created_at')
+                    if date:
+                        raw['createdAt']=int(datetime.fromisoformat(date.replace('Z','+00:00')).timestamp())
+                    clean=existing and existing['note']==existing.get('sourceNote','') and existing['text']==existing.get('sourceText',existing['text'])
+                    if existing and clean:
+                        raw={**existing,**raw,'favorite':existing['favorite'],'tags':list(dict.fromkeys(existing['tags']+raw['tags'])),
+                             'archived':existing['archived'],'bookId':existing['bookId'],
+                             'sourceText':raw['text'],'sourceNote':raw['note']}
+                        # Do not take the generic import's identical-ID early return.
+                        raw.pop('id',None)
+                    _,created=self.put(raw,overwrite=bool(clean),commit=False)
+                    state['imported']+=int(created); state['processed']+=1
+            state.update(cursor=cursor,inProgress=bool(cursor),failures=0,
+                         nextAt=now()+4 if cursor else now()+900,
+                         message='Importing Readwise library…' if cursor else 'Readwise library is up to date.')
+            if not cursor: state['lastSuccess']=state.pop('startedAt')
+            self.save_readwise_state(state)
+            self.db.execute('RELEASE readwise_page'); self.db.commit()
+            return {'readwiseMore':bool(cursor)}
+        except Exception as error:
+            self.db.rollback()
+            state['imported'],state['processed']=previous_counts
+            state['failures']=state.get('failures',0)+1
+            delay=min(3600,60*2**min(state['failures']-1,6))
+            if isinstance(error,urllib.error.HTTPError):
+                if error.code in (401,403):
+                    delay=86400; message='Reconnect Readwise: the saved token was rejected.'
+                elif error.code==429:
+                    try: delay=max(delay,min(86400,int((error.headers or {}).get('Retry-After','60'))))
+                    except (ValueError,TypeError): pass
+                    message='Readwise is busy. Shelf will retry automatically.'
+                else: message='Readwise is temporarily unavailable. Shelf will retry automatically.'
+            elif isinstance(error,(OSError,ValueError,KeyError,TypeError,OverflowError)):
+                message='Readwise import could not finish. Saved highlights are safe; Shelf will retry.'
+            else: raise
+            state.update(nextAt=now()+delay,message=message)
+            self.save_readwise_state(state); self.db.commit()
+            return {'readwiseError':message}
+
+    def archive_readwise(self,item):
+        item.update(archived=True,remoteDeleted=True,updatedAt=now())
+        self.db.execute('UPDATE highlights SET value=? WHERE id=?',(json.dumps(item,ensure_ascii=False),item['id']))
 
     def sync(self, credentials, automatic=False):
         s=self.settings()
@@ -406,6 +532,7 @@ def dispatch(lib, p):
     elif action=='retry':
         with lib.db: lib.db.execute("UPDATE queue SET status='pending',next_at=0,updated=? WHERE id=? AND status!='sending'",(now(),p['id']))
     elif action=='sync': lib.sync(p.get('credentials',{}),p.get('automatic',False))
+    elif action=='importReadwise': result=lib.import_readwise(p.get('credentials',{}).get('token',''),p.get('automatic',False))
     elif action in ('export','exportPreview'): result['content']=export_items(lib.filter(p.get('rules')),lib.settings(),p.get('format','markdown'))
     elif action=='bookMetadata':
         for item in lib.items():
@@ -436,7 +563,7 @@ def dispatch(lib, p):
             lib.db.rollback(); raise
         finally: lib.batch=False
     elif action!='list': raise ValueError('Unknown annotation action')
-    return {'ok':True,**result,'items':lib.filter({'archived':True} if p.get('all') else p.get('rules')),'settings':lib.settings(),'collections':lib.collections(),'review':lib.review(),'queue':lib.queue(),'conflicts':lib.conflicts()}
+    return {'ok':True,**result,'readwiseSync':lib.readwise_status(),'items':lib.filter({'archived':True} if p.get('all') else p.get('rules')),'settings':lib.settings(),'collections':lib.collections(),'review':lib.review(),'queue':lib.queue(),'conflicts':lib.conflicts()}
 
 
 def main():
