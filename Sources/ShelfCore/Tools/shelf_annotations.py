@@ -269,6 +269,9 @@ class Library:
                 raise ValueError('Invalid export cursor')
             # No changes to highlights or cursor survive a malformed/failed page.
             self.db.execute('SAVEPOINT readwise_page')
+            legacy_by_id={}
+            for item in self.items():
+                if item['source']=='Readwise Reader': legacy_by_id.setdefault(item['sourceId'],[]).append(item)
             for book in page['results']:
                 if not isinstance(book,dict) or not book.get('user_book_id'):
                     raise ValueError('Invalid book')
@@ -286,7 +289,7 @@ class Library:
                     existing=json.loads(prior[0]) if prior else None
                     if not existing and highlight.get('external_id'):
                         # Upgrade an old Reader import only with an exact provider ID.
-                        legacy=[x for x in self.items() if x['source']=='Readwise Reader' and x['sourceId']==str(highlight['external_id'])]
+                        legacy=legacy_by_id.pop(str(highlight['external_id']),[])
                         if len(legacy)==1:
                             existing={**legacy[0],'source':'Readwise','sourceId':source_id,'sourceBookId':book_id}
                             self.db.execute('UPDATE highlights SET identity=?,value=? WHERE id=?',
