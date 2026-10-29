@@ -88,6 +88,7 @@ jobs:
             sleep 1
           done
           grep -q 'dashboard page loaded' "$RUNNER_TEMP/shelf-startup.log" || { cat "$RUNNER_TEMP/shelf-startup.log"; sample "$APP_PID" 3 -file "$RUNNER_TEMP/shelf-sample.txt"; head -140 "$RUNNER_TEMP/shelf-sample.txt"; exit 1; }
+          grep -q 'signed updater ready=1' "$RUNNER_TEMP/shelf-startup.log" || { cat "$RUNNER_TEMP/shelf-startup.log"; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

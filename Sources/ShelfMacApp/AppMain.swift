@@ -322,6 +322,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         loadingLabel.isHidden=true
         NSLog("Shelf: dashboard page loaded")
+        if let updater=shelfUpdater?.updater { NSLog("Shelf: signed updater ready=%d",updater.canCheckForUpdates) }
         annotationRequest(["action":"list"])
         if let key=pendingHighlightLink { pendingHighlightLink=nil; openHighlightLink(key) }
     }
