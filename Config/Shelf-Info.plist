@@ -21,5 +21,9 @@
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>14400</integer>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUSignedFeedFailureExpirationInterval</key>
+	<integer>0</integer>
 </dict>
 </plist>

@@ -41,6 +41,10 @@ brew install --cask somamill/shelf/shelf
 
 The first launch checks common Calibre library locations and prepares an incoming-books folder. If your library is elsewhere, choose its folder once; optional sync services can be connected later.
 
+### Automatic updates
+
+Updater-enabled releases can check, download, and install signed updates from inside Shelf. Enable the options under Updates after the one-time bootstrap installation. Developers configure update signing once; see [Automatic updates](Documentation/AUTOMATIC-UPDATES.md).
+
 ### Build from source
 
 Requirements: macOS 14 or later, Xcode, Python 3, and a local Calibre library.

@@ -14,6 +14,10 @@ Create and export a Developer ID Application certificate from the Apple Develope
 
 Use the Apple account's least-privileged suitable access. Never commit these values or paste them into issues or chat. Rotate the certificate/password if they are exposed.
 
+## Automatic-update signing
+
+Configure the persistent `SPARKLE_PRIVATE_KEY` secret once using `Scripts/setup-updater-signing.sh` on the developer Mac. Update archives and feeds are signed independently of Apple Developer ID. The release workflow now fails closed when this key is missing and publishes complete signed assets atomically from a draft. See [automatic updates](AUTOMATIC-UPDATES.md).
+
 ## Create a release
 
 Push a version tag such as `v0.1.38`. The `macOS release` workflow builds Shelf with its universal Python runtimes, then either notarizes it or creates the unsigned community build. It publishes `Shelf.dmg`, a versioned app ZIP, and a SHA-256 checksum to the matching GitHub release. The Homebrew cask downloads the stable `Shelf.dmg` asset and discloses that macOS may require a one-time approval. Do not remove quarantine attributes or disable Gatekeeper to make installation appear seamless.

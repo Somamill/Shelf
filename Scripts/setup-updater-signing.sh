@@ -17,6 +17,14 @@ trap 'rm -rf "$temporary"' EXIT
 bash "$root/Scripts/download-sparkle.sh" "$temporary/sparkle"
 "$temporary/sparkle/bin/generate_keys" --account app.shelf.dashboard
 "$temporary/sparkle/bin/generate_keys" --account app.shelf.dashboard -x "$temporary/private.key"
+python3 - "$temporary/private.key" <<'PYKEY'
+import base64,pathlib,sys
+try:
+    valid=len(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))==32
+except Exception:
+    valid=False
+if not valid:sys.exit('This key uses an unsupported format. No GitHub secret was changed.')
+PYKEY
 # The private seed goes through stdin, not shell arguments or console output.
 gh secret set SPARKLE_PRIVATE_KEY --repo Somamill/Shelf < "$temporary/private.key"
 echo 'Configured SPARKLE_PRIVATE_KEY in GitHub Actions. The original key remains in your Mac login Keychain; keep a secure backup.'

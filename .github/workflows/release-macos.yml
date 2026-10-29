@@ -10,6 +10,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: shelf-release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -29,6 +33,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           test -n "$SPARKLE_PRIVATE_KEY" || { echo 'Configure SPARKLE_PRIVATE_KEY using Scripts/setup-updater-signing.sh on the developer Mac.' >&2; exit 1; }
+          python3 - <<'PYTAG'
+          import os,pathlib,re,sys
+          version=re.search(r'MARKETING_VERSION: ([0-9.]+)',pathlib.Path('project.yml').read_text()).group(1)
+          if os.environ['RELEASE_TAG']!='v'+version:sys.exit('Release tag does not match the app version')
+          PYTAG
           umask 077
           python3 - <<'PYKEY'
           import os,base64,sys
@@ -60,6 +69,15 @@ jobs:
           then
             gh release download --repo "$GITHUB_REPOSITORY" --pattern sparkle-public-key.txt --dir "$RUNNER_TEMP/previous-updater"
             cmp "$RUNNER_TEMP/previous-updater/sparkle-public-key.txt" "$RUNNER_TEMP/sparkle-public-key.txt" || { echo 'Update signing key changed. Use a supported key-rotation plan instead.' >&2; exit 1; }
+            gh release download --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir "$RUNNER_TEMP/previous-updater"
+            "$RUNNER_TEMP/Sparkle/bin/sign_update" --verify --ed-key-file "$RUNNER_TEMP/sparkle.key" "$RUNNER_TEMP/previous-updater/appcast.xml"
+            python3 - "$RUNNER_TEMP/previous-updater/appcast.xml" <<'PYBUILD'
+          import pathlib,re,sys,xml.etree.ElementTree as ET
+          ns='{http://www.andymatuschak.org/xml-namespaces/sparkle}'
+          versions=[int(x.text) for x in ET.parse(sys.argv[1]).getroot().iter(ns+'version')]
+          build=int(re.search(r'CURRENT_PROJECT_VERSION: (\d+)',pathlib.Path('project.yml').read_text()).group(1))
+          if not versions or build<=max(versions):sys.exit('Increase CURRENT_PROJECT_VERSION before publishing an update')
+          PYBUILD
           fi
       - name: Check Apple signing secrets
         id: signing-check
