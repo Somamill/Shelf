@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 import WebKit
 import SQLite3
 import ShelfCore
+import Sparkle
 import Vision
 import PDFKit
 
@@ -119,6 +120,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var refreshTimer: Timer?
     private var refreshInProgress = false
     private var updateCheckInProgress=false
+    private var shelfUpdater:SPUStandardUpdaterController?
     private var dashboardContentView:NSView?
     private var readerContentView:NSView?
     private var readerWebView:WKWebView?
@@ -260,6 +262,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("Shelf: applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.regular)
+        if let key=Bundle.main.object(forInfoDictionaryKey:"SUPublicEDKey") as? String, Data(base64Encoded:key)?.count == 32 {
+            shelfUpdater=SPUStandardUpdaterController(startingUpdater:true,updaterDelegate:nil,userDriverDelegate:nil)
+            NSLog("Shelf: signed updater initialized")
+        }
         buildMenu()
         let config = WKWebViewConfiguration()
         let controller = WKUserContentController()
@@ -316,6 +322,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         loadingLabel.isHidden=true
         NSLog("Shelf: dashboard page loaded")
+        if let updater=shelfUpdater?.updater { NSLog("Shelf: signed updater ready=%d",updater.canCheckForUpdates) }
         annotationRequest(["action":"list"])
         if let key=pendingHighlightLink { pendingHighlightLink=nil; openHighlightLink(key) }
     }
@@ -369,6 +376,14 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 applyReaderPreferences()
             }
         case "refresh": refresh()
+        case "checkShelfUpdates": checkShelfUpdates()
+        case "loadUpdatePreferences": sendUpdatePreferences()
+        case "saveUpdatePreferences":
+            if let updater=shelfUpdater?.updater {
+                updater.automaticallyChecksForUpdates=body["checks"] as? Bool ?? false
+                updater.automaticallyDownloadsUpdates=updater.automaticallyChecksForUpdates && (body["downloads"] as? Bool ?? false)
+            }
+            sendUpdatePreferences()
         case "checkUpdates": checkUpdates()
         case "checkAll": checkAll()
         case "fixAll": confirmFixAll()
@@ -531,6 +546,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let appMenu=NSMenu(); app.submenu=appMenu
         appMenu.addItem(withTitle:"About Shelf",action:#selector(NSApplication.orderFrontStandardAboutPanel(_:)),keyEquivalent:"")
         appMenu.addItem(.separator())
+        let shelfUpdate=NSMenuItem(title:"Check for Shelf Updates…",action:#selector(checkShelfUpdates),keyEquivalent:"")
+        if let controller=shelfUpdater { shelfUpdate.target=controller; shelfUpdate.action=#selector(SPUStandardUpdaterController.checkForUpdates(_:)) }
+        else { shelfUpdate.target=self }
+        appMenu.addItem(shelfUpdate)
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle:"Quit Dashboard",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let view=NSMenuItem(); view.title="Dashboard"; menu.addItem(view)
         let viewMenu=NSMenu(); view.submenu=viewMenu
@@ -617,7 +637,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var components=URLComponents(string:"https://openlibrary.org/search.json")
             components?.queryItems=[URLQueryItem(name:"title",value:title),URLQueryItem(name:"limit",value:"10"),URLQueryItem(name:"fields",value:"cover_i,title,author_name")]
             guard let searchURL=components?.url else { return }
-            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.2.0 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.2.1 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var responseData:Data?,status=0
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 status=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -670,7 +690,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let source else { return }
             if let coverPath=source["coverPath"] as? String,!coverPath.isEmpty,
                let image=CGImageSourceCreateWithURL(URL(fileURLWithPath:coverPath) as CFURL,nil),CGImageSourceGetCount(image)>0 { return }
-            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.2.0 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.2.1 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var downloaded:Data?,statusCode=0,mimeType=""
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 statusCode=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -2220,19 +2240,19 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
-    private func confirmUpdateDashboard() {
-        let alert=NSAlert()
-        alert.messageText="Rebuild and update the dashboard app?"
-        alert.informativeText="Rebuilds the installed dashboard from its local project files and reopens it."
-        alert.addButton(withTitle:"Update dashboard")
-        alert.addButton(withTitle:"Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        notify("Rebuilding dashboard…")
-        let installer="\(projectPath)/Scripts/build-and-install.sh"
-        DispatchQueue.global(qos:.utility).async { [weak self] in
-            let result=Self.run("/bin/bash",[installer])
-            DispatchQueue.main.async { self?.notify(result.code == 0 ? "Dashboard rebuild completed." : "Dashboard rebuild failed: \(result.output.trimmingCharacters(in:.whitespacesAndNewlines).suffix(220))") }
-        }
+    private func confirmUpdateDashboard() { checkShelfUpdates() }
+
+    @objc private func checkShelfUpdates() {
+        guard let controller=shelfUpdater else { notify("Automatic updates need a release configured with Shelf’s update-signing key. See the updater setup guide."); return }
+        guard controller.updater.canCheckForUpdates else { notify("An update check or installation is already in progress."); return }
+        controller.checkForUpdates(nil)
+    }
+
+    private func sendUpdatePreferences() {
+        send("updatePreferences",["configured":shelfUpdater != nil,
+            "checks":shelfUpdater?.updater.automaticallyChecksForUpdates ?? false,
+            "downloads":shelfUpdater?.updater.automaticallyDownloadsUpdates ?? false,
+            "version":Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "Unknown"])
     }
 
     private func sendBooxSettings() {

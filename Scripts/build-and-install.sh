@@ -105,7 +105,14 @@ else
     -emit-module -emit-library -module-name ShelfCore \
     -emit-module-path "$RESOURCES/ShelfCore.swiftmodule" \
     -o "$RESOURCES/libShelfCore.dylib" "$PROJECT_ROOT/Sources/ShelfCore/ShelfCore/SetupModels.swift"
+  SPARKLE_DIR="$BUILD_ROOT/Sparkle"
+  bash "$PROJECT_ROOT/Scripts/download-sparkle.sh" "$SPARKLE_DIR"
+  SPARKLE_FRAMEWORKS="$SPARKLE_DIR/Sparkle.xcframework/macos-arm64_x86_64"
+  mkdir -p "$CONTENTS/Frameworks"
+  ditto "$SPARKLE_FRAMEWORKS/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
   swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx14.0" \
+    -F "$SPARKLE_FRAMEWORKS" -framework Sparkle \
+    -Xlinker -rpath -Xlinker '@executable_path/../Frameworks' \
     -framework AppKit -framework WebKit -framework Vision -framework PDFKit -I "$RESOURCES" -L "$RESOURCES" -lShelfCore \
     -Xlinker -rpath -Xlinker '@executable_path/../Resources' \
     -o "$CONTENTS/MacOS/Shelf" "$PROJECT_ROOT/Sources/ShelfMacApp/AppMain.swift"
@@ -124,13 +131,19 @@ else
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.2.0</string>
-<key>CFBundleVersion</key><string>44</string>
+<key>CFBundleShortVersionString</key><string>0.2.1</string>
+<key>CFBundleVersion</key><string>45</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
 PLIST
-  xattr -cr "$BUILT_APP" 2>/dev/null || true
+  /usr/bin/python3 - "$PROJECT_ROOT/Config/Shelf-Info.plist" "$CONTENTS/Info.plist" <<'PYINFO'
+import plistlib,sys
+with open(sys.argv[1], 'rb') as f: custom=plistlib.load(f)
+with open(sys.argv[2], 'rb') as f: info=plistlib.load(f)
+info.update(custom)
+with open(sys.argv[2], 'wb') as f: plistlib.dump(info,f)
+PYINFO
   codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILT_APP"
 fi
 if [[ ! -d "$BUILT_APP" ]]; then

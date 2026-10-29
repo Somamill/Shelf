@@ -17,32 +17,35 @@
 		4B615E82AC373201608C95C9 /* boox_rotation.py in Resources */ = {isa = PBXBuildFile; fileRef = 650147434549546734006E3B /* boox_rotation.py */; };
 		5689FF5507B438A705170C38 /* shelf_book_actions.py in Resources */ = {isa = PBXBuildFile; fileRef = 2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */; };
 		5F0B527A57CBABFAF1644923 /* bookshelf.py in Resources */ = {isa = PBXBuildFile; fileRef = D2156C8B4C8FDE6BEB6035C9 /* bookshelf.py */; };
-		730CFB1D2ABC2638E99D0144 /* ShelfCore in Frameworks */ = {isa = PBXBuildFile; productRef = D3B3D7FE690B7CCB4CC75D90 /* ShelfCore */; };
+		730CFB1D2ABC2638E99D0144 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6E7AA30822AD2AA9BBA2EB9C /* Sparkle */; };
 		78D22BA7AE6DC22342A3A2BA /* shelf_config.py in Resources */ = {isa = PBXBuildFile; fileRef = 729F6C853F3FDF0E021F87AA /* shelf_config.py */; };
 		78E3C712135EF62800ED0B25 /* boox_settings.py in Resources */ = {isa = PBXBuildFile; fileRef = 8B32A8A7EF187897DF2E7B13 /* boox_settings.py */; };
+		AAA5132F0A3C50EA1C7B27D5 /* ShelfCore in Frameworks */ = {isa = PBXBuildFile; productRef = D3B3D7FE690B7CCB4CC75D90 /* ShelfCore */; };
+		ACE670D79E6CB4B2DA6DCB8D /* shelf_annotations.py in Resources */ = {isa = PBXBuildFile; fileRef = 43AAC851C380CD7E8C14C017 /* shelf_annotations.py */; };
 		BDE45900DBB68F6ECA8E90E7 /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E2AEAFC476556B6591566B /* AppMain.swift */; };
 		C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 15975E75F118DA6A5F9DDC22 /* AppIcon.icns */; };
 		CA04118D7DFF0280FFF26873 /* app.js in Resources */ = {isa = PBXBuildFile; fileRef = 9096715045380B07144496A7 /* app.js */; };
 		DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */ = {isa = PBXBuildFile; fileRef = 32B8DD740E9D64ABA17E06E1 /* PythonRuntime */; };
+		DD441DFAEED25388C66C101C /* shelf_studio.py in Resources */ = {isa = PBXBuildFile; fileRef = 7E0BFBCF34700F18B4435F11 /* shelf_studio.py */; };
 		ED671E2BE235BDD21A18A8D0 /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 5E4687CC9A77B219982C2592 /* index.html */; };
 		ED741A475C850F11E42A559E /* kosync_calibre_bridge.py in Resources */ = {isa = PBXBuildFile; fileRef = B3AF4E815C2B4AF0A1B40186 /* kosync_calibre_bridge.py */; };
-		A128A71A1010101010101001 /* shelf_annotations.py in Resources */ = {isa = PBXBuildFile; fileRef = A128A71A1010101010101002 /* shelf_annotations.py */; };
-		A128A71A1010101010101003 /* shelf_studio.py in Resources */ = {isa = PBXBuildFile; fileRef = A128A71A1010101010101004 /* shelf_studio.py */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		12B67EC8E0475301B4424C41 /* CalibreStackDashboard */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CalibreStackDashboard; path = .; sourceTree = SOURCE_ROOT; };
 		15975E75F118DA6A5F9DDC22 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		20096C905A07887BF87BAB46 /* calibre_fts.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = calibre_fts.py; sourceTree = "<group>"; };
 		2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_book_actions.py; sourceTree = "<group>"; };
 		32B8DD740E9D64ABA17E06E1 /* PythonRuntime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PythonRuntime; path = Resources/PythonRuntime; sourceTree = SOURCE_ROOT; };
 		33E2AEAFC476556B6591566B /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
+		43AAC851C380CD7E8C14C017 /* shelf_annotations.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_annotations.py; sourceTree = "<group>"; };
+		48F70B1D8D51C66592CB1BB8 /* Shelf */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Shelf; path = .; sourceTree = SOURCE_ROOT; };
 		5E4687CC9A77B219982C2592 /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		650147434549546734006E3B /* boox_rotation.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_rotation.py; sourceTree = "<group>"; };
 		651C15DF7B8D47C401DD2135 /* config.example.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = config.example.json; sourceTree = "<group>"; };
 		71413F49BD77FBE2E13F3787 /* readwise_reader_sync.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = readwise_reader_sync.py; sourceTree = "<group>"; };
 		729F6C853F3FDF0E021F87AA /* shelf_config.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_config.py; sourceTree = "<group>"; };
 		7BFADF4D5203B98BD10D1181 /* reader_book.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = reader_book.py; sourceTree = "<group>"; };
+		7E0BFBCF34700F18B4435F11 /* shelf_studio.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_studio.py; sourceTree = "<group>"; };
 		8B32A8A7EF187897DF2E7B13 /* boox_settings.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_settings.py; sourceTree = "<group>"; };
 		8EF8B349102C7D642FBD64F7 /* open_library_book.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = open_library_book.py; sourceTree = "<group>"; };
 		9096715045380B07144496A7 /* app.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = app.js; sourceTree = "<group>"; };
@@ -51,8 +54,6 @@
 		C434CA69BBA8550DF6E411AC /* Shelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D2156C8B4C8FDE6BEB6035C9 /* bookshelf.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = bookshelf.py; sourceTree = "<group>"; };
 		E9D67CA3233AF59FB22C2DD3 /* apple_books.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = apple_books.py; sourceTree = "<group>"; };
-		A128A71A1010101010101002 /* shelf_annotations.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_annotations.py; sourceTree = "<group>"; };
-		A128A71A1010101010101004 /* shelf_studio.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_studio.py; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,7 +61,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				730CFB1D2ABC2638E99D0144 /* ShelfCore in Frameworks */,
+				730CFB1D2ABC2638E99D0144 /* Sparkle in Frameworks */,
+				AAA5132F0A3C50EA1C7B27D5 /* ShelfCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,8 +81,6 @@
 			isa = PBXGroup;
 			children = (
 				E9D67CA3233AF59FB22C2DD3 /* apple_books.py */,
-				A128A71A1010101010101002 /* shelf_annotations.py */,
-				A128A71A1010101010101004 /* shelf_studio.py */,
 				D2156C8B4C8FDE6BEB6035C9 /* bookshelf.py */,
 				650147434549546734006E3B /* boox_rotation.py */,
 				8B32A8A7EF187897DF2E7B13 /* boox_settings.py */,
@@ -89,8 +89,10 @@
 				8EF8B349102C7D642FBD64F7 /* open_library_book.py */,
 				7BFADF4D5203B98BD10D1181 /* reader_book.py */,
 				71413F49BD77FBE2E13F3787 /* readwise_reader_sync.py */,
+				43AAC851C380CD7E8C14C017 /* shelf_annotations.py */,
 				2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */,
 				729F6C853F3FDF0E021F87AA /* shelf_config.py */,
+				7E0BFBCF34700F18B4435F11 /* shelf_studio.py */,
 			);
 			path = Tools;
 			sourceTree = "<group>";
@@ -134,7 +136,7 @@
 		AC1DA195D6463FE432930E9E /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				12B67EC8E0475301B4424C41 /* CalibreStackDashboard */,
+				48F70B1D8D51C66592CB1BB8 /* Shelf */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -193,6 +195,7 @@
 			);
 			name = Shelf;
 			packageProductDependencies = (
+				6E7AA30822AD2AA9BBA2EB9C /* Sparkle */,
 				D3B3D7FE690B7CCB4CC75D90 /* ShelfCore */,
 			);
 			productName = Shelf;
@@ -220,6 +223,7 @@
 			mainGroup = F98F003EE2747A05DCC0CF21;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				8A8FD7C6D4706EF21D0F2ACD /* XCRemoteSwiftPackageReference "Sparkle" */,
 				333FA89EAA41A995DD6E9E06 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -241,8 +245,6 @@
 				DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */,
 				CA04118D7DFF0280FFF26873 /* app.js in Resources */,
 				2CEECEF5579850629BE85585 /* apple_books.py in Resources */,
-				A128A71A1010101010101001 /* shelf_annotations.py in Resources */,
-				A128A71A1010101010101003 /* shelf_studio.py in Resources */,
 				5F0B527A57CBABFAF1644923 /* bookshelf.py in Resources */,
 				4B615E82AC373201608C95C9 /* boox_rotation.py in Resources */,
 				78E3C712135EF62800ED0B25 /* boox_settings.py in Resources */,
@@ -253,8 +255,10 @@
 				20289FFE617A574C82A2556E /* open_library_book.py in Resources */,
 				169E70579C1BB94E8C32806F /* reader_book.py in Resources */,
 				1A9CAB3A150EEE451B9573A9 /* readwise_reader_sync.py in Resources */,
+				ACE670D79E6CB4B2DA6DCB8D /* shelf_annotations.py in Resources */,
 				5689FF5507B438A705170C38 /* shelf_book_actions.py in Resources */,
 				78D22BA7AE6DC22342A3A2BA /* shelf_config.py in Resources */,
+				DD441DFAEED25388C66C101C /* shelf_studio.py in Resources */,
 				49A0629B6694AFE1DEDAD4C6 /* style.css in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -422,7 +426,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -436,7 +440,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
@@ -450,7 +454,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -464,7 +468,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
@@ -502,7 +506,23 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		8A8FD7C6D4706EF21D0F2ACD /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		6E7AA30822AD2AA9BBA2EB9C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8A8FD7C6D4706EF21D0F2ACD /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		D3B3D7FE690B7CCB4CC75D90 /* ShelfCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ShelfCore;

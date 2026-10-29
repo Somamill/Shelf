@@ -6,6 +6,9 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
   ShelfCore:
     path: .
 targets:
@@ -73,14 +76,16 @@ targets:
           test -s "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/AppIcon.icns"
           touch "$SCRIPT_OUTPUT_FILE_0"
     dependencies:
+      - package: Sparkle
+        product: Sparkle
       - package: ShelfCore
         product: ShelfCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.2.0
-        CURRENT_PROJECT_VERSION: 44
+        MARKETING_VERSION: 0.2.1
+        CURRENT_PROJECT_VERSION: 45
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
