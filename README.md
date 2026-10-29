@@ -6,13 +6,15 @@
   <img src="Resources/Icons/AppIcon.png" width="96" alt="Shelf app icon">
 </p>
 
-> Current version: **0.1.42** · macOS · MIT licensed
+> Current version: **0.2.0** · macOS · MIT licensed
 
 ## What Shelf does
 
 - **One shelf across sources.** Browse Calibre titles and formats alongside reading records from Apple Books, Hardcover, and connected readers. Matching uses title and author evidence so different editions can share one shelf entry.
 - **Covers and metadata.** Loads embedded Calibre covers, then checks high-confidence Open Library results for missing artwork and saves successful matches back into Calibre. If no reliable cover is available, Shelf shows a readable title card instead of an empty image box. A read-only library health summary points out missing covers, authors, formats, and likely duplicate records.
 - **Read and track.** Open EPUBs in the built-in paginated reader, keep progress and highlights, and view finish status and reading statistics.
+- **Highlights and review.** Search passages across sources, edit notes and tags, save collections, review highlights, and export Markdown/CSV/JSON. Imports, annotation backups, and an optional upload queue keep the workflow local until you enable a destination. See [Highlights guide](Documentation/HIGHLIGHTS.md).
+- **Reading Studio.** Recognize text from images/PDFs locally, transcribe downloaded audio, ask cited questions of your highlights, and export snapshots directly to Notion. External uploads require explicit action. See [Studio setup and limits](Documentation/STUDIO.md).
 - **Sync services.** Check Calibre, KOReader Sync, CrossPoint, Hardcover, Readwise, and Readwise Reader connections from the dashboard.
 - **Device setup.** Configure supported KOReader/CrossPoint readers and see when a reader last sent progress. A disconnected reader can only upload after it reconnects to Wi-Fi.
 - **A focused interface.** Choose Black (OLED black) or Bright. Motion follows macOS reduced-motion settings and uses native WebKit timing at the display’s supported refresh rate.

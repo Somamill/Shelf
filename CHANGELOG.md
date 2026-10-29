@@ -1,3 +1,14 @@
+## 0.2.0
+
+- Add a local highlight library with searchable passages, notes, tags, favorites, archives, saved collections, and optional daily review.
+- Add Markdown/CSV/JSON exports, previewed annotation imports, and portable backups that preserve source identities and local edits.
+- Queue opt-in annotation uploads, surface source conflicts, and require review of unconfirmed uploads before retrying.
+- Preserve reader highlight positions, restore saved marks, and support local highlight links and per-book appearance.
+- Add Reading Studio: local image/PDF OCR, podcast transcription and timestamped transcript imports, cited highlight chat, and direct Notion snapshot exports.
+- Keep external Studio uploads explicit; store service keys privately and exclude them from portable backups.
+- Fix Calibre Digest authentication checks, improve bridge timeout handling, and include multiple distinct issues in diagnostics.
+- Add regression coverage for annotations, Studio consent/receipts, imports, backups, and browser workflows.
+
 ## 0.1.42
 
 - Make log copying visibly progress, report clipboard failures, and verify that macOS accepted the clipboard write.

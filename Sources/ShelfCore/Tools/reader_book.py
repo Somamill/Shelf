@@ -132,7 +132,7 @@ def partial_md5(path: Path) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or not sys.argv[1].isdigit():
+    if len(sys.argv) not in (2,3) or not sys.argv[1].isdigit() or (len(sys.argv)==3 and sys.argv[2]!='--source-only'):
         raise ValueError('Choose a book from your Calibre library.')
     book_id = int(sys.argv[1])
     if not DB.is_file():
@@ -167,6 +167,9 @@ def main() -> None:
     if source is None:
         raise FileNotFoundError('No readable ebook file was found for this book.')
 
+    if len(sys.argv)==3:
+        print(json.dumps({'sourcePath':str(source)})); return
+
     primary_document = partial_md5(source)
     reader_directory, html, cache_hit = prepare_reader(source, primary_document)
     sync_documents = [primary_document]
@@ -194,6 +197,7 @@ def main() -> None:
         'document': primary_document,
         'syncDocuments': sync_documents,
         'htmlPath': str(html),
+        'sourcePath': str(source),
         'workDir': str(reader_directory),
         'persistentCache': True,
         'cacheHit': cache_hit,

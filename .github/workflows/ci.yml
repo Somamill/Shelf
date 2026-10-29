@@ -30,6 +30,7 @@ jobs:
       - name: Validate scripts and dashboard JavaScript
         run: |
           python3 -m py_compile Sources/ShelfCore/Tools/*.py
+          python3 -m unittest discover -s Tests/Python -v
           node --check Resources/Dashboard/app.js
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml --project .

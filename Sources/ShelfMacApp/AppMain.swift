@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 import WebKit
 import SQLite3
 import ShelfCore
+import Vision
+import PDFKit
 
 private final class WeakScriptMessageHandler:NSObject, WKScriptMessageHandler {
     weak var target:WKScriptMessageHandler?
@@ -106,6 +108,14 @@ private struct ShelfConfiguration {
 final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
+    private let studioQueue=DispatchQueue(label:"app.shelf.studio",qos:.utility)
+    private var studioIsBusy=false
+    private var studioCancellation:URL?
+    private var selectedStudioAudio:URL?
+    private var pendingNotionExport:[String:Any]?
+    private let annotationQueue=DispatchQueue(label:"app.shelf.annotations",qos:.utility)
+    private var pendingAnnotationImport:[String:Any]?
+    private var pendingHighlightLink:String?
     private var refreshTimer: Timer?
     private var refreshInProgress = false
     private var updateCheckInProgress=false
@@ -295,6 +305,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         refreshTimer = Timer.scheduledTimer(withTimeInterval:60,repeats:true) { [weak self] _ in
             guard let self, self.window.isVisible, !self.window.isMiniaturized else { return }
             self.refresh()
+            self.annotationMaintenance()
         }
     }
 
@@ -305,6 +316,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         loadingLabel.isHidden=true
         NSLog("Shelf: dashboard page loaded")
+        annotationRequest(["action":"list"])
+        if let key=pendingHighlightLink { pendingHighlightLink=nil; openHighlightLink(key) }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -340,6 +353,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         guard let body=message.body as? [String:Any], let type=body["type"] as? String else { return }
         switch type {
+        case "annotations": annotationRequest(body)
+        case "studio": studioRequest(body)
         case "loadSetup": loadSetup()
         case "autoSetup": autoSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
@@ -602,7 +617,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var components=URLComponents(string:"https://openlibrary.org/search.json")
             components?.queryItems=[URLQueryItem(name:"title",value:title),URLQueryItem(name:"limit",value:"10"),URLQueryItem(name:"fields",value:"cover_i,title,author_name")]
             guard let searchURL=components?.url else { return }
-            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.1.42 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:searchURL);request.timeoutInterval=12;request.setValue("Shelf/0.2.0 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var responseData:Data?,status=0
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 status=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -655,7 +670,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let source else { return }
             if let coverPath=source["coverPath"] as? String,!coverPath.isEmpty,
                let image=CGImageSourceCreateWithURL(URL(fileURLWithPath:coverPath) as CFURL,nil),CGImageSourceGetCount(image)>0 { return }
-            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.1.42 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
+            var request=URLRequest(url:url);request.timeoutInterval=12;request.setValue("Shelf/0.2.0 (Calibre cover repair)",forHTTPHeaderField:"User-Agent")
             let semaphore=DispatchSemaphore(value:0);var downloaded:Data?,statusCode=0,mimeType=""
             URLSession.shared.dataTask(with:request) { data,response,_ in
                 statusCode=(response as? HTTPURLResponse)?.statusCode ?? 0
@@ -865,13 +880,20 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
-    private func openBook(_ bookId:Int) {
+    private func openBook(_ bookId:Int,highlight:[String:Any]?=nil) {
         guard bookId > 0 else { return }
         notify("Preparing your book…")
+        let useSystemReader=highlight == nil && UserDefaults.standard.dictionary(forKey:"annotationSettings")?["defaultReader"] as? String == "system"
         let script=Bundle.main.resourceURL?.appendingPathComponent("reader_book.py").path ?? "\(home)/Shelf/reader_book.py"
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
-            let result=Self.run(self.pythonExecutable,[script,String(bookId)])
+            let result=Self.run(self.pythonExecutable,[script,String(bookId)]+(useSystemReader ? ["--source-only"] : []))
+            if useSystemReader {
+                if let output=try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any],let path=output["sourcePath"] as? String {
+                    DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath:path)) }
+                } else { DispatchQueue.main.async { self.notify("Could not locate this book’s file.") } }
+                return
+            }
             guard result.code == 0, let bytes=result.output.data(using:.utf8),
                   let payload=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any],
                   let document=payload["document"] as? String,
@@ -884,12 +906,16 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var reader=payload
             let documents=payload["syncDocuments"] as? [String] ?? [document]
             reader["resumePercentage"]=0
-            reader["savedHighlights"]=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook")?[String(bookId)] as? [[String:Any]] ?? []
+            self.annotationQueue.sync { self.migrateAnnotations() }
+            _=self.annotationResult(["action":"bookMetadata","bookId":bookId,"title":payload["title"] ?? "","author":payload["authors"] ?? ""])
+            let annotations=self.annotationResult(["action":"list","rules":["bookId":bookId]])
+            reader["savedHighlights"]=annotations["items"] ?? []
+            reader["focusHighlight"]=highlight ?? [:]
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.showReader(reader,htmlURL:URL(fileURLWithPath:htmlPath),workDirectory:URL(fileURLWithPath:workDir,isDirectory:true))
                 DispatchQueue.global(qos:.utility).async { [weak self] in
-                    guard let self,let saved=self.fetchReaderProgress(documents) else { return }
+                    guard let self, highlight == nil, UserDefaults.standard.dictionary(forKey:"annotationSettings")?["restorePosition"] as? Bool != false, let saved=self.fetchReaderProgress(documents) else { return }
                     DispatchQueue.main.async {
                         guard let active=self.activeReader,(active["bookId"] as? Int)==bookId else { return }
                         self.readerWebView?.evaluateJavaScript("window.readerSetResume && window.readerSetResume(\(saved));",completionHandler:nil)
@@ -970,6 +996,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             "filename":payload["filename"] ?? "",
             "language":payload["language"] ?? "",
             "appearance":UserDefaults.standard.string(forKey:"shelfResolvedAppearance") ?? "dark",
+            "highlightColor":UserDefaults.standard.dictionary(forKey:"annotationSettings")?["color"] ?? "yellow",
+            "savedHighlights":payload["savedHighlights"] ?? [],
+            "focusHighlight":payload["focusHighlight"] ?? [:],
             "resumePercentage":payload["resumePercentage"] ?? 0
         ]
         let language=(payload["language"] as? String ?? "").lowercased()
@@ -982,6 +1011,14 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let savedFont=UserDefaults.standard.string(forKey:fontKey) ?? (japanese ? "serif" : "sans")
         let font=["serif","sans","system"].contains(savedFont) ? savedFont : (japanese ? "serif" : "sans")
         readerFontChoice=font
+        if UserDefaults.standard.dictionary(forKey:"annotationSettings")?["rememberPerBook"] as? Bool == true,
+           let id=(payload["bookId"] as? NSNumber)?.intValue,
+           let preferences=UserDefaults.standard.dictionary(forKey:"readerPreferences.\(id)") {
+            readerFontSize=preferences["size"] as? Double ?? readerFontSize
+            readerFontChoice=preferences["font"] as? String ?? readerFontChoice
+            UserDefaults.standard.set(preferences["theme"],forKey:"readerTheme")
+            UserDefaults.standard.set(preferences["spacing"],forKey:"readerSpacing")
+        }
         let savedTheme=UserDefaults.standard.string(forKey:"readerTheme") ?? "auto"
         let theme=["auto","light","paper","night"].contains(savedTheme) ? savedTheme : "auto"
         let savedSpacing=UserDefaults.standard.string(forKey:"readerSpacing") ?? "normal"
@@ -1026,15 +1063,18 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               let savedHighlightRange=null,savedHighlightText='';
               function rememberHighlightSelection(){const selection=window.getSelection(),text=(selection?.toString()||'').trim();if(text&&selection.rangeCount){savedHighlightRange=selection.getRangeAt(0).cloneRange();savedHighlightText=text}}
               document.addEventListener('selectionchange',rememberHighlightSelection);document.addEventListener('mouseup',rememberHighlightSelection);document.addEventListener('touchend',rememberHighlightSelection);
-              function wrapHighlight(range,note){try{const mark=document.createElement('mark');mark.className='reader-highlight';if(note)mark.title=note;mark.appendChild(range.extractContents());range.insertNode(mark);return true}catch(_){return false}}
-              window.readerApplyHighlightText=function(text,note){text=String(text||'').trim();if(!text||!readerFlow)return false;if(savedHighlightRange&&savedHighlightText===text){const ok=wrapHighlight(savedHighlightRange,note);savedHighlightRange=null;savedHighlightText='';return ok}const walker=document.createTreeWalker(readerFlow,NodeFilter.SHOW_TEXT),nodes=[];let compact='',node;while((node=walker.nextNode())){if(node.parentElement?.closest('mark.reader-highlight'))continue;for(let i=0;i<node.nodeValue.length;i++){if(/\\s/.test(node.nodeValue[i]))continue;nodes.push([node,i]);compact+=node.nodeValue[i]}}const needle=text.replace(/\\s+/g,'');const index=compact.indexOf(needle);if(index<0||!needle)return false;const range=document.createRange();range.setStart(nodes[index][0],nodes[index][1]);const last=nodes[index+needle.length-1];range.setEnd(last[0],last[1]+1);return wrapHighlight(range,note)};
-              window.readerApplySavedHighlights=function(){for(const item of (window.readerBook.savedHighlights||[])){window.readerApplyHighlightText(item.text,item.note)}};
-              window.captureReaderHighlight=function(){const selection=window.getSelection(),selected=(selection?.toString()||'').trim(),text=selected||savedHighlightText,range=selection?.rangeCount?selection.getRangeAt(0).cloneRange():savedHighlightRange;if(!text||!range){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'Select a passage first, then choose Highlight.'});return}if(text.length>4096){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'That passage is too long to save as one highlight.'});return}savedHighlightRange=range;savedHighlightText=text;const c=chapterIndex();window.webkit.messageHandlers.reader.postMessage({type:'highlight',text:text,chapter:window.readerChapters[c]?.title||'',page:currentPage+1,percentage:percentage()})};
+              function rangeAt(start,end){if(!readerFlow||start<0||end<=start)return null;const walk=document.createTreeWalker(readerFlow,NodeFilter.SHOW_TEXT);let pos=0,node,range=document.createRange(),begun=false;while((node=walk.nextNode())){const next=pos+node.nodeValue.length;if(!begun&&start>=pos&&start<next){range.setStart(node,start-pos);begun=true}if(begun&&end<=next){range.setEnd(node,end-pos);return range}pos=next}return null}
+              function highlightRange(item){const all=readerFlow?.textContent||'',quote=String(item.text||''),loc=item.location||{};if(!quote)return null;const start=Number(loc.start),end=Number(loc.end);if(Number.isInteger(start)&&Number.isInteger(end)&&all.slice(start,end)===quote)return rangeAt(start,end);let index=-1,candidates=[];while((index=all.indexOf(quote,index+1))>=0){if(loc.prefix&&!all.slice(Math.max(0,index-loc.prefix.length),index).endsWith(loc.prefix))continue;if(loc.suffix&&!all.slice(index+quote.length,index+quote.length+loc.suffix.length).startsWith(loc.suffix))continue;candidates.push(index)}return candidates.length===1?rangeAt(candidates[0],candidates[0]+quote.length):null}
+              function wrapHighlight(range,note,color='yellow'){try{const mark=document.createElement('mark');mark.className='reader-highlight';mark.style.setProperty('background',({yellow:'#ffe08a',green:'#a7d8b9',blue:'#a9c9f1',pink:'#edb1d1'})[color]||'#ffe08a','important');if(note)mark.title=note;mark.appendChild(range.extractContents());range.insertNode(mark);return true}catch(_){return false}}
+              window.readerApplyHighlightText=function(text,note){if(savedHighlightRange&&savedHighlightText===text){const ok=wrapHighlight(savedHighlightRange,note,window.readerBook.highlightColor);savedHighlightRange=null;savedHighlightText='';return ok}const range=highlightRange({text});return range?wrapHighlight(range,note):false};
+              window.readerApplySavedHighlights=function(){for(const mark of [...readerFlow.querySelectorAll('mark.reader-highlight')])mark.replaceWith(...mark.childNodes);readerFlow.normalize();for(const item of(window.readerBook.savedHighlights||[])){if(item.archived)continue;const range=highlightRange(item);if(range)wrapHighlight(range,item.note,item.color)}};
+              window.readerFocusHighlight=function(item){const range=highlightRange(item);if(!range){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'This passage location could not be matched safely in the current edition.'});return}const rect=range.getBoundingClientRect(),x=rect.left+readerViewport.scrollLeft;setPage(Math.floor(x/step()),false);userHasNavigated=true};
+              window.captureReaderHighlight=function(){const selection=window.getSelection(),selected=(selection?.toString()||'').trim(),text=selected||savedHighlightText,range=selection?.rangeCount?selection.getRangeAt(0).cloneRange():savedHighlightRange;if(!text||!range||!readerFlow.contains(range.commonAncestorContainer)){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'Select a passage first, then choose Highlight.'});return}if(text.length>4096){window.webkit.messageHandlers.reader.postMessage({type:'highlightError',message:'That passage is too long to save as one highlight.'});return}const before=document.createRange();before.selectNodeContents(readerFlow);before.setEnd(range.startContainer,range.startOffset);const raw=range.toString(),leading=raw.length-raw.trimStart().length,start=before.toString().length+leading,end=start+text.length,all=readerFlow.textContent||'';savedHighlightRange=range;savedHighlightText=text;const c=chapterIndex();window.webkit.messageHandlers.reader.postMessage({type:'highlight',text,chapter:window.readerChapters[c]?.title||'',chapterIndex:c,page:currentPage+1,pages:pageCount,percentage:percentage(),start,end,prefix:all.slice(Math.max(0,start-48),start),suffix:all.slice(end,end+48)})};
               function setupPages(){readerViewport=document.createElement('main');readerViewport.id='reader-viewport';readerFlow=document.createElement('article');readerFlow.id='reader-flow';while(document.body.firstChild)readerFlow.appendChild(document.body.firstChild);readerViewport.appendChild(readerFlow);document.body.appendChild(readerViewport);const userRead=()=>{allowProgressSync=true};let touchStart=null,wheelTravel=0,lastWheelPage=0;readerViewport.addEventListener('pointerdown',userRead,{passive:true});readerViewport.addEventListener('touchstart',e=>{userRead();const t=e.changedTouches[0];touchStart={x:t.clientX,y:t.clientY,moved:false}},{passive:true});readerViewport.addEventListener('touchmove',e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;if(Math.abs(dx)>16&&Math.abs(dx)>Math.abs(dy)*1.2){touchStart.moved=true;e.preventDefault()}},{passive:false});readerViewport.addEventListener('touchend',e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y,moved=touchStart.moved;touchStart=null;if(moved&&Math.abs(dx)>54&&Math.abs(dx)>Math.abs(dy)*1.35)window.readerPage(dx<0?1:-1)},{passive:true});readerViewport.addEventListener('wheel',e=>{userRead();if(Math.abs(e.deltaX)>Math.abs(e.deltaY)*1.35){e.preventDefault();wheelTravel+=e.deltaX;if(Math.abs(wheelTravel)>=72&&Date.now()-lastWheelPage>620){window.readerPage(wheelTravel>0?1:-1);wheelTravel=0;lastWheelPage=Date.now()}}else{wheelTravel=0}},{passive:false});readerViewport.addEventListener('scroll',()=>{currentPage=Math.max(0,Math.min(pageCount-1,Math.round(readerViewport.scrollLeft/step())));if(Date.now()-lastPositionSent>160){lastPositionSent=Date.now();sendPosition()}if(allowProgressSync)window.syncReaderProgress()},{passive:true});window.addEventListener('resize',()=>{const p=percentage();layoutPages();setPage(Math.round(p*(pageCount-1)),false)});}
               window.readerAckProgress=function(p){lastSent=Number(p);progressSyncPending=false;if(Math.abs(percentage()-lastSent)>=0.004)setTimeout(window.syncReaderProgress,350)};
               window.readerFailProgress=function(){progressSyncPending=false};
               window.syncReaderProgress=function(){if(!allowProgressSync||progressSyncPending)return;lastCandidate=percentage();if(lastSent>=0&&Math.abs(lastCandidate-lastSent)<0.004)return;if(Date.now()-lastProgressAttempt<1500)return;lastProgressAttempt=Date.now();progressSyncPending=true;window.webkit.messageHandlers.reader.postMessage({type:'progress',bookId:window.readerBook.bookId,document:window.readerBook.document,syncDocuments:window.readerBook.syncDocuments,percentage:lastCandidate,progress:lastCandidate.toFixed(6),metadata:{title:window.readerBook.title,authors:window.readerBook.authors,filename:window.readerBook.filename,language:window.readerBook.language}})};
-              function resume(){const p=Number(window.readerBook.resumePercentage||0);layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*step();lastSent=p;lastCandidate=p;sendPosition();window.readerApplySavedHighlights();window.webkit.messageHandlers.reader.postMessage({type:'chapters',chapters:window.readerChapters})}
+              function resume(){const p=Number(window.readerBook.resumePercentage||0);layoutPages();currentPage=Math.round((pageCount-1)*p);readerViewport.scrollLeft=currentPage*step();lastSent=p;lastCandidate=p;sendPosition();window.readerApplySavedHighlights();if(window.readerBook.focusHighlight?.text)window.readerFocusHighlight(window.readerBook.focusHighlight);window.webkit.messageHandlers.reader.postMessage({type:'chapters',chapters:window.readerChapters})}
               window.addEventListener('load',()=>{setupPages();window.readerApplyPreferences({font:'\(font)',theme:'\(theme)',spacing:'\(spacing)',size:\(readerFontSize)});setTimeout(resume,140)});
               window.addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();window.readerPage(1)}else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();window.readerPage(-1)}else if(e.key==='Home'){e.preventDefault();setPage(0,true)}else if(e.key==='End'){e.preventDefault();setPage(pageCount-1,true)}});
               window.addEventListener('pagehide',window.syncReaderProgress);window.addEventListener('beforeunload',window.syncReaderProgress);setInterval(window.syncReaderProgress,15000);
@@ -1131,6 +1171,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard let data=try? JSONSerialization.data(withJSONObject:readerPreferencePayload()),let json=String(data:data,encoding:.utf8) else { return }
         readerWebView?.evaluateJavaScript("window.readerApplyPreferences && window.readerApplyPreferences(\(json));",completionHandler:nil)
         readerSizeLabel?.stringValue="\(Int(readerFontSize)) pt"
+        if UserDefaults.standard.dictionary(forKey:"annotationSettings")?["rememberPerBook"] as? Bool == true,
+           let id=(activeReader?["bookId"] as? NSNumber)?.intValue {
+            UserDefaults.standard.set(readerPreferencePayload(),forKey:"readerPreferences.\(id)")
+        }
     }
 
     private func updateReaderChapters(_ chapters:[[String:Any]]) {
@@ -1189,78 +1233,22 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func syncReaderHighlight(_ body:[String:Any]) {
         guard let text=body["text"] as? String,!text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
-              let reader=activeReader,let document=reader["document"] as? String,
-              document.range(of:#"^[0-9a-fA-F]{32}$"#,options:.regularExpression) != nil else { return }
-        let bookId=(reader["bookId"] as? NSNumber)?.intValue ?? 0
-        guard saveLocalReaderHighlight(text,bookId:bookId,note:"") else { notify("This passage is already saved as a highlight."); return }
-        readerWebView?.evaluateJavaScript("window.readerApplyHighlightText && window.readerApplyHighlightText(\(Self.javascriptString(text)))",completionHandler:nil)
-        let key=syncAuthKey()
-        guard !key.isEmpty else {
-            publishReadwiseHighlight(title:reader["title"] as? String ?? "",author:reader["authors"] as? String ?? "",text:text) { saved in
-                DispatchQueue.main.async { self.notify(saved ? "Highlight saved on this Mac and added to Readwise Reader." : "Highlight saved on this Mac. KOReader Sync is unavailable right now.") }
-            }
-            return
-        }
-        let now=Int(Date().timeIntervalSince1970)
-        let page=max(1,(body["page"] as? Int) ?? 1)
-        let pageCount=max(page,(body["pages"] as? Int) ?? page)
-        let item:[String:Any]=[
-            "id":UUID().uuidString,"spine":0,"start_page":page,"end_page":page,"pages":pageCount,
-            "start_word":0,"end_word":0,"words":0,"para":NSNull(),
-            "chapter":String((body["chapter"] as? String ?? "").prefix(64)),"text":String(text.prefix(4096)),
-            "created_at":now,"layout_signature":0,"start_offset":NSNull(),"end_offset":NSNull(),
-            "color":"yellow"
-        ]
-        guard let url=URL(string:"\(service("crosspointApi", fallback: "http://127.0.0.1:17303"))/clippings/\(document)"),
-              let data=try? JSONSerialization.data(withJSONObject:["items":[item]]) else {
-            notify("Could not prepare this highlight."); return
-        }
-        var request=URLRequest(url:url,timeoutInterval:12)
-        request.httpMethod="PUT"; request.httpBody=data
-        request.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        request.setValue(username,forHTTPHeaderField:"x-auth-user")
-        request.setValue(key,forHTTPHeaderField:"x-auth-key")
-        request.setValue("application/vnd.koreader.v1+json",forHTTPHeaderField:"Accept")
-        URLSession.shared.dataTask(with:request) { [weak self] _,response,error in
+              let reader=activeReader else { return }
+        var item=body; item.removeValue(forKey:"type")
+        item["bookId"]=reader["bookId"] ?? 0; item["title"]=reader["title"] ?? ""
+        item["author"]=reader["authors"] ?? ""; item["source"]="Shelf"
+        item["document"]=reader["document"] ?? ""
+        annotationQueue.async { [weak self] in
+            guard let self else { return }
+            self.migrateAnnotations()
+            let result=self.annotationResult(["action":"add","item":item,"all":true])
             DispatchQueue.main.async {
-                guard let self else { return }
-                guard error == nil,(response as? HTTPURLResponse)?.statusCode == 200 else {
-                    self.publishReadwiseHighlight(title:reader["title"] as? String ?? "",author:reader["authors"] as? String ?? "",text:text) { saved in
-                        DispatchQueue.main.async { self.notify(saved ? "Highlight saved locally and added to Readwise Reader. Cross-device sync is unavailable." : "Highlight saved on this Mac. Cross-device sync could not be reached.") }
-                    }
-                    return
-                }
-                self.publishReadwiseHighlight(title:reader["title"] as? String ?? "",
-                                              author:reader["authors"] as? String ?? "",text:text) { readwiseOK in
-                    DispatchQueue.main.async {
-                        self.notify(readwiseOK ? "Highlight saved locally, synced to your readers, and added to Readwise Reader." : "Highlight saved locally and synced to your readers.")
-                    }
-                }
+                guard result["ok"] as? Bool == true else { self.notify("Could not save this passage. Please try again."); return }
+                self.readerWebView?.evaluateJavaScript("window.readerApplyHighlightText && window.readerApplyHighlightText(\(Self.javascriptString(text)))",completionHandler:nil)
+                self.send("annotationData",result)
+                self.notify("Highlight saved locally. Enabled destinations will sync from the queue.")
+                self.annotationMaintenance()
             }
-        }.resume()
-    }
-
-    private func saveLocalReaderHighlight(_ text:String,bookId:Int,note:String) -> Bool {
-        guard bookId > 0 else { return false }
-        var all=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook") as? [String:[[String:Any]]] ?? [:]
-        var items=all[String(bookId)] ?? []
-        let identity=text.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard !items.contains(where:{(($0["text"] as? String) ?? "").trimmingCharacters(in:.whitespacesAndNewlines)==identity}) else { return false }
-        items.append(["id":"shelf-\(UUID().uuidString)","text":identity,"note":note,"source":"Shelf"])
-        all[String(bookId)]=items
-        UserDefaults.standard.set(all,forKey:"readwiseHighlightsByBook")
-        return true
-    }
-
-    private func publishReadwiseHighlight(title:String,author:String,text:String,completion:@escaping(Bool)->Void) {
-        guard let token=localCredential("readwise-reader-token"),!token.isEmpty else { completion(false); return }
-        let helper=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
-        let input:[String:Any]=["action":"createHighlight","readwiseToken":token,"title":title,"author":author,"text":text]
-        guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { completion(false); return }
-        DispatchQueue.global(qos:.utility).async {
-            let result=Self.run(self.pythonExecutable,[helper],input:json)
-            let ok=(try? JSONSerialization.jsonObject(with:Data(result.output.utf8)) as? [String:Any])?["ok"] as? Bool == true
-            completion(ok)
         }
     }
 
@@ -1317,11 +1305,14 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 notify("Could not save the Readwise token to Shelf’s private local credential file."); return
             }
         }
-        guard let syncKey=Optional(syncAuthKey()),!syncKey.isEmpty else { notify("KOReader Sync credentials are unavailable."); return }
+        let syncKey=syncAuthKey()
         let script=Bundle.main.resourceURL?.appendingPathComponent("readwise_reader_sync.py").path ?? "\(home)/Shelf/readwise_reader_sync.py"
         let syncBase=service("kosyncHealth",fallback:"http://127.0.0.1:17200/healthcheck").replacingOccurrences(of:"/healthcheck",with:"")
         let endpoints=Array(Set([syncBase,service("crosspointApi",fallback:"http://127.0.0.1:17303")].filter{ !$0.isEmpty }))
-        let input:[String:Any]=["readwiseToken":token,"syncKey":syncKey,"username":username,"syncEndpoints":endpoints]
+        let annotationSettings=UserDefaults.standard.dictionary(forKey:"annotationSettings") ?? [:]
+        let input:[String:Any]=["readwiseToken":token,"syncKey":syncKey,"username":username,"syncEndpoints":endpoints,
+            "importHighlights":annotationSettings["importReadwise"] as? Bool ?? true,
+            "importProgress":annotationSettings["importProgress"] as? Bool ?? true]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { notify("Could not prepare the Readwise sync."); return }
         notify("Syncing Readwise Reader with matching Calibre books…")
         DispatchQueue.global(qos:.utility).async { [weak self] in
@@ -1334,15 +1325,17 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 DispatchQueue.main.async { self.notify(message) }
                 return
             }
-            var all=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook") as? [String:[[String:Any]]] ?? [:]
             let remote=response["highlightsByBook"] as? [String:[[String:Any]]] ?? [:]
-            for (bookId,highlights) in remote {
-                var merged=all[bookId] ?? []
-                let texts=Set(merged.compactMap{$0["text"] as? String})
-                merged.append(contentsOf:highlights.filter{!texts.contains($0["text"] as? String ?? "")})
-                all[bookId]=merged
+            let imported=remote.flatMap { key,items -> [[String:Any]] in
+                items.map { raw in var item=raw; item["bookId"]=Int(key) ?? 0; item["source"]="Readwise Reader"; item["sourceId"]=raw["id"] ?? ""; return item }
             }
-            UserDefaults.standard.set(all,forKey:"readwiseHighlightsByBook")
+            self.annotationQueue.sync {
+                self.migrateAnnotations()
+                if let bytes=try? JSONSerialization.data(withJSONObject:imported),let content=String(data:bytes,encoding:.utf8) {
+                    _=self.annotationResult(["action":"import","content":content,"format":"json"])
+                }
+            }
+            let annotationResponse=self.annotationResult(["action":"list","all":true])
             let pushed=(response["progressPushed"] as? Int) ?? 0
             let matched=(response["matched"] as? Int) ?? 0
             let savedHighlights=remote.values.reduce(0){$0+$1.count}
@@ -1350,13 +1343,350 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if pushed>0 { _=Self.run(self.pythonExecutable,[self.bridgeScriptPath]) }
             DispatchQueue.main.async {
                 self.loadBooks()
+                self.send("annotationData",annotationResponse)
                 if let active=self.activeReader,let bookId=(active["bookId"] as? NSNumber)?.intValue,
-                   let highlights=all[String(bookId)],let bytes=try? JSONSerialization.data(withJSONObject:highlights),
+                   let all=annotationResponse["items"] as? [[String:Any]],
+                   let bytes=try? JSONSerialization.data(withJSONObject:all.filter { ($0["bookId"] as? Int) == bookId }),
                    let json=String(data:bytes,encoding:.utf8) {
                     self.readerWebView?.evaluateJavaScript("window.readerBook.savedHighlights=\(json);window.readerApplySavedHighlights&&window.readerApplySavedHighlights()",completionHandler:nil)
                 }
                 let suffix=failures>0 ? " · \(failures) sync endpoints unavailable" : ""
                 self.notify("Readwise sync complete · \(matched) books matched · \(pushed) progress updates · \(savedHighlights) highlights imported\(suffix)")
+            }
+        }
+    }
+
+    // Annotation operations are serialized; imports and queue updates survive app restarts.
+    func application(_ application:NSApplication,open urls:[URL]) {
+        for url in urls where url.scheme == "shelf" && url.host == "highlight" {
+            let key=url.lastPathComponent
+            guard UUID(uuidString:key) != nil else { continue }
+            if webView == nil { pendingHighlightLink=key } else { openHighlightLink(key) }
+        }
+    }
+
+    private func openHighlightLink(_ key:String) {
+        annotationQueue.async { [weak self] in
+            guard let self else { return }
+            let response=self.annotationResult(["action":"list","all":true])
+            let item=(response["items"] as? [[String:Any]])?.first { $0["id"] as? String == key }
+            DispatchQueue.main.async {
+                guard let item else { self.notify("This highlight is not in the local annotation library."); return }
+                self.annotationRequest(["action":"open","item":item])
+            }
+        }
+    }
+
+    private func studioResult(_ input:[String:Any])->[String:Any] {
+        let helper=Bundle.main.resourceURL?.appendingPathComponent("shelf_studio.py").path
+            ?? "\(configuration.path("project",fallback:"\(home)/Shelf"))/Sources/ShelfCore/Tools/shelf_studio.py"
+        guard let data=try? JSONSerialization.data(withJSONObject:input),let source=String(data:data,encoding:.utf8) else { return ["ok":false,"error":"Could not prepare Studio operation."] }
+        let result=Self.run(pythonExecutable,[helper],input:source)
+        return (try? JSONSerialization.jsonObject(with:Data(result.output.utf8))) as? [String:Any]
+            ?? ["ok":false,"error":"Studio could not complete the operation."]
+    }
+
+    private func studioDecorate(_ raw:[String:Any])->[String:Any] {
+        var result=raw
+        if let options=result["options"] as? [String:Any] { UserDefaults.standard.set(options,forKey:"studioOptions") }
+        result["notionConnected"] = !(localCredential("notion-token") ?? "").isEmpty
+        result["openaiConnected"] = !(localCredential("studio-ai-key") ?? "").isEmpty
+        result["audioName"]=selectedStudioAudio?.lastPathComponent ?? ""
+        var tools=[String:String]()
+        for kind in ["whisperExecutable","whisperModel","ffmpegExecutable"] {
+            let path=UserDefaults.standard.string(forKey:"studio.\(kind)") ?? ""
+            tools[kind]=path.isEmpty ? "Not selected" : (path as NSString).lastPathComponent
+        }
+        result["tools"]=tools
+        return result
+    }
+
+    private func studioRequest(_ body:[String:Any]) {
+        let action=body["action"] as? String ?? "status"
+        if action == "cancel" {
+            if let file=studioCancellation { FileManager.default.createFile(atPath:file.path,contents:Data()) }
+            notify("Cancellation requested. Local processing will stop as soon as possible."); return
+        }
+        guard !studioIsBusy else { notify("Studio is processing another operation. Wait or cancel local processing first."); return }
+        if action == "chooseTool" {
+            let kind=body["kind"] as? String ?? ""
+            guard ["whisperExecutable","whisperModel","ffmpegExecutable"].contains(kind) else { return }
+            let panel=NSOpenPanel(); panel.canChooseDirectories=false; panel.canChooseFiles=true
+            panel.message=kind == "whisperModel" ? "Choose a verified whisper.cpp GGML model." : "Choose the local executable Shelf may run for transcription."
+            panel.beginSheetModal(for:window) { [weak self] response in
+                guard response == .OK,let self,let url=panel.url else { return }
+                if kind != "whisperModel", !FileManager.default.isExecutableFile(atPath:url.path) { self.notify("That file is not executable."); return }
+                UserDefaults.standard.set(url.path,forKey:"studio.\(kind)")
+                self.studioRequest(["action":"status"])
+            }; return
+        }
+        if action == "chooseAudio" {
+            let panel=NSOpenPanel(); panel.allowedContentTypes=[.audio,.movie]; panel.allowsMultipleSelection=false
+            panel.beginSheetModal(for:window) { [weak self] response in
+                guard response == .OK,let self,let url=panel.url else { return }
+                self.selectedStudioAudio=url; self.studioRequest(["action":"status"])
+            }; return
+        }
+        if action == "chooseTranscript" {
+            let panel=NSOpenPanel(); panel.allowedContentTypes=[.plainText,UTType(filenameExtension:"vtt") ?? .plainText,UTType(filenameExtension:"srt") ?? .plainText]
+            panel.beginSheetModal(for:window) { [weak self] response in
+                guard response == .OK,let self,let url=panel.url else { return }
+                do {
+                    guard ((try url.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? 0)<5_000_000 else { self.notify("Choose a transcript smaller than 5 MB."); return }
+                    let content=try String(contentsOf:url,encoding:.utf8)
+                    self.studioRequest(["action":"importTranscript","content":content,"title":url.deletingPathExtension().lastPathComponent,"format":["srt","vtt"].contains(url.pathExtension.lowercased()) ? url.pathExtension.lowercased() : "txt"])
+                } catch { self.notify("Could not read the selected transcript.") }
+            }; return
+        }
+        if action == "chooseOCR" {
+            let panel=NSOpenPanel(); panel.allowedContentTypes=[.image,.pdf]; panel.allowsMultipleSelection=false
+            panel.beginSheetModal(for:window) { [weak self] response in
+                guard response == .OK,let self,let url=panel.url else { return }
+                self.runStudioOCR(url)
+            }; return
+        }
+        if action == "disconnect" {
+            let provider=body["provider"] as? String ?? ""
+            guard ["notion","openai"].contains(provider) else { return }
+            guard deleteLocalCredential(provider == "notion" ? "notion-token" : "studio-ai-key") else { notify("Could not remove this credential."); return }
+            studioRequest(["action":"status"]); return
+        }
+        var payload=body; payload.removeValue(forKey:"type")
+        if action == "saveCredential" {
+            guard let provider=body["provider"] as? String,["notion","openai"].contains(provider),let value=body["value"] as? String,!value.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { notify("Enter the service key first."); return }
+            payload=["action":"validateCredential","provider":provider,"credential":value.trimmingCharacters(in:.whitespacesAndNewlines)]
+        }
+        if action == "chat" || action == "transcribe" { payload["aiToken"]=localCredential("studio-ai-key") ?? "" }
+        if action == "notionExport" {
+            guard let pending=pendingNotionExport else { notify("Preview the Notion export first."); return }
+            payload["rules"]=pending["rules"] ?? [:]; payload["expected"]=pending["digests"] ?? []
+            payload["notionToken"]=localCredential("notion-token") ?? ""
+        }
+        if action == "transcribe" {
+            guard let url=selectedStudioAudio else { notify("Choose an audio file first."); return }
+            payload["audioPath"]=url.path; payload["title"]=url.deletingPathExtension().lastPathComponent
+            for kind in ["whisperExecutable","whisperModel","ffmpegExecutable"] { payload[kind]=UserDefaults.standard.string(forKey:"studio.\(kind)") ?? "" }
+        }
+        let cancel=FileManager.default.temporaryDirectory.appendingPathComponent("shelf-cancel-\(UUID().uuidString)")
+        studioCancellation=cancel; payload["cancelFile"]=cancel.path
+        studioIsBusy=true; send("studioBusy",["busy":true,"canCancel":action == "transcribe" && UserDefaults.standard.dictionary(forKey:"studioOptions")?["transcriptionProvider"] as? String != "openai","message":action == "transcribe" ? "Transcribing audio. Longer recordings can take several minutes." : "Working…"])
+        studioQueue.async { [weak self] in
+            guard let self else { return }
+            var response=self.studioResult(payload); response["action"]=action
+            if action == "saveCredential",response["ok"] as? Bool == true,let provider=body["provider"] as? String,let value=body["value"] as? String {
+                if !self.saveLocalCredential(provider == "notion" ? "notion-token" : "studio-ai-key",value:value.trimmingCharacters(in:.whitespacesAndNewlines)) { response=["ok":false,"error":"Could not save the verified key locally."] }
+            }
+            DispatchQueue.main.async {
+                self.studioIsBusy=false; self.studioCancellation=nil; try? FileManager.default.removeItem(at:cancel)
+                if let plan=response["notionPreview"] as? [String:Any],let pages=plan["pages"] as? [[String:Any]] {
+                    self.pendingNotionExport=["rules":body["rules"] ?? [:],"digests":pages.compactMap{$0["digest"] as? String}]
+                }
+                self.send("studioBusy",["busy":false])
+                self.send("studioData",self.studioDecorate(response))
+                if response["ok"] as? Bool != true { self.notify(response["error"] as? String ?? "Studio operation failed.") }
+                if let content=response["content"] as? String,action == "exportCapture" { self.saveAnnotationExport(content,format:"txt",title:response["filename"] as? String ?? "Shelf Capture") }
+                if action == "saveExcerpt",response["ok"] as? Bool == true { self.annotationRequest(["action":"list"]); self.notify("Passage saved in Highlights.") }
+            }
+        }
+    }
+
+    private func runStudioOCR(_ url:URL) {
+        guard !studioIsBusy else { notify("Another Studio operation is running."); return }
+        let cancel=FileManager.default.temporaryDirectory.appendingPathComponent("shelf-cancel-\(UUID().uuidString)")
+        studioIsBusy=true; studioCancellation=cancel; send("studioBusy",["busy":true,"canCancel":true,"message":"Recognizing text locally with Apple Vision…"])
+        studioQueue.async { [weak self] in
+            guard let self else { return }
+            var response:[String:Any]
+            do {
+                let options=self.studioResult(["action":"status"])["options"] as? [String:Any] ?? [:]
+                let languages=options["ocrLanguages"] as? [String] ?? ["en-US"]
+                let limit=max(1,min(50,options["ocrPages"] as? Int ?? 10))
+                let bytes=try Data(contentsOf:url,options:.mappedIfSafe)
+                guard bytes.count<100_000_000 else { throw NSError(domain:"ShelfOCR",code:1,userInfo:[NSLocalizedDescriptionKey:"Choose an image or PDF smaller than 100 MB."]) }
+                var segments=[[String:Any]](); var totalPages=1
+                let pdf=url.pathExtension.lowercased() == "pdf" ? PDFDocument(url:url) : nil
+                if let pdf { totalPages=pdf.pageCount }
+                guard totalPages>0 else { throw NSError(domain:"ShelfOCR",code:2,userInfo:[NSLocalizedDescriptionKey:"This PDF has no accessible pages."]) }
+                for index in 0..<min(limit,totalPages) {
+                    if FileManager.default.fileExists(atPath:cancel.path) { throw NSError(domain:"ShelfOCR",code:3,userInfo:[NSLocalizedDescriptionKey:"OCR cancelled."]) }
+                    var image:NSImage?
+                    if let pdf,let page=pdf.page(at:index) {
+                        let bounds=page.bounds(for:.mediaBox); let height=max(1,bounds.height);let width=max(1,bounds.width)
+                        image=page.thumbnail(of:NSSize(width:1800*width/max(width,height),height:1800*height/max(width,height)),for:.mediaBox)
+                    }
+                    var recognizedImage=image?.cgImage(forProposedRect:nil,context:nil,hints:nil)
+                    if pdf == nil,let source=CGImageSourceCreateWithData(bytes as CFData,nil) {
+                        recognizedImage=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceThumbnailMaxPixelSize:2400] as CFDictionary)
+                    }
+                    guard let cg=recognizedImage else { continue }
+                    let request=VNRecognizeTextRequest(); request.recognitionLevel = .accurate; request.usesLanguageCorrection=true; request.recognitionLanguages=languages
+                    try VNImageRequestHandler(cgImage:cg,options:[:]).perform([request])
+                    let lines=(request.results ?? []).compactMap{$0.topCandidates(1).first?.string}
+                    let passage=lines.joined(separator:"\n")
+                    if !passage.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty { segments.append(["text":passage,"page":index+1,"start":0,"end":0]) }
+                }
+                response=self.studioResult(["action":"storeCapture","kind":"OCR","title":url.deletingPathExtension().lastPathComponent,"segments":segments,"identity":SHA256.hash(data:bytes).map{String(format:"%02x",$0)}.joined()])
+                response["ocrProcessedPages"]=min(limit,totalPages);response["ocrTotalPages"]=totalPages
+            } catch {
+                response=["ok":false,"error":"OCR could not complete. Check the selected file, recognition languages, PDF access, or cancellation."]
+            }
+            DispatchQueue.main.async {
+                self.studioIsBusy=false;self.studioCancellation=nil;try? FileManager.default.removeItem(at:cancel)
+                self.send("studioBusy",["busy":false]);self.send("studioData",self.studioDecorate(response))
+                if response["ok"] as? Bool != true { self.notify(response["error"] as? String ?? "OCR failed.") }
+            }
+        }
+    }
+
+    private func annotationResult(_ payload:[String:Any])->[String:Any] {
+        let helper=Bundle.main.resourceURL?.appendingPathComponent("shelf_annotations.py").path
+            ?? "\(configuration.path("project",fallback:"\(home)/Shelf"))/Sources/ShelfCore/Tools/shelf_annotations.py"
+        guard let data=try? JSONSerialization.data(withJSONObject:payload),let json=String(data:data,encoding:.utf8) else {
+            return ["ok":false,"error":"Could not encode annotations."]
+        }
+        let result=Self.run(pythonExecutable,[helper],input:json)
+        return (try? JSONSerialization.jsonObject(with:Data(result.output.utf8))) as? [String:Any]
+            ?? ["ok":false,"error":"The annotation library could not be opened."]
+    }
+
+    private func migrateAnnotations() {
+        guard !UserDefaults.standard.bool(forKey:"annotationMigration1") else { return }
+        let legacy=UserDefaults.standard.dictionary(forKey:"readwiseHighlightsByBook") ?? [:]
+        if annotationResult(["action":"migrate","legacy":legacy])["ok"] as? Bool == true {
+            // Keep the original data until a user explicitly removes it.
+            UserDefaults.standard.set(true,forKey:"annotationMigration1")
+        }
+    }
+
+    private func annotationRequest(_ body:[String:Any]) {
+        let action=body["action"] as? String ?? "list"
+        if action == "chooseImport" || action == "chooseRestore" {
+            let panel=NSOpenPanel(); panel.canChooseDirectories=false; panel.allowsMultipleSelection=false
+            panel.allowedContentTypes=[.json,.plainText,.commaSeparatedText]
+            panel.beginSheetModal(for:window) { [weak self] response in
+                guard response == .OK,let self,let url=panel.url else { return }
+                do {
+                    let size=(try url.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? 0
+                    guard size <= 20_000_000 else { self.notify("Choose a file smaller than 20 MB."); return }
+                    let content=try String(contentsOf:url,encoding:.utf8)
+                    self.pendingAnnotationImport=["content":content,"format":body["format"] ?? "json","restore":action == "chooseRestore"]
+                    self.annotationRequest(["action":"previewImport","content":content,"format":action == "chooseRestore" ? "backup" : (body["format"] ?? "json")])
+                } catch { self.notify("Could not read that annotation file.") }
+            }
+            return
+        }
+        if action == "applyImport" {
+            guard let pending=pendingAnnotationImport else { notify("Choose and preview an import first."); return }
+            var payload=pending; payload["action"]=(pending["restore"] as? Bool == true) ? "restore" : "import"
+            payload["bookId"]=body["bookId"] ?? 0
+            pendingAnnotationImport=nil; annotationRequest(payload); return
+        }
+        if action == "chooseExportFolder" {
+            let panel=NSOpenPanel(); panel.canChooseDirectories=true; panel.canChooseFiles=false; panel.canCreateDirectories=true
+            panel.beginSheetModal(for:window) { [weak self] response in
+                guard response == .OK,let self,let url=panel.url else { return }
+                UserDefaults.standard.set(url.path,forKey:"annotationExportFolder")
+                self.notify("Export folder saved. Scheduled exports use Shelf-managed files in this folder.")
+                self.annotationRequest(["action":"list"])
+            }; return
+        }
+        if action == "open" {
+            guard let item=body["item"] as? [String:Any],let book=item["bookId"] as? Int,book>0 else {
+                notify("Link this highlight to a Calibre book first."); return
+            }
+            openBook(book,highlight:item); return
+        }
+        annotationQueue.async { [weak self] in
+            guard let self else { return }
+            self.migrateAnnotations()
+            var payload=body; payload.removeValue(forKey:"type"); payload["all"]=true
+            if action == "sync" {
+                payload["credentials"]=["token":self.localCredential("readwise-reader-token") ?? "",
+                    "syncKey":self.syncAuthKey(),"username":self.username,
+                    "crosspoint":self.service("crosspointApi",fallback:"http://127.0.0.1:17303")]
+            }
+            var response=self.annotationResult(payload)
+            response["action"]=action
+            DispatchQueue.main.async {
+                if response["ok"] as? Bool != true {
+                    self.notify(response["error"] as? String ?? "Annotation operation failed.")
+                }
+                if let settings=response["settings"] as? [String:Any] {
+                    UserDefaults.standard.set(settings,forKey:"annotationSettings")
+                }
+                if action == "previewAppleBooks",let content=response["importContent"] as? String {
+                    self.pendingAnnotationImport=["content":content,"format":"json","restore":false]
+                    response["action"]="previewImport"
+                    response.removeValue(forKey:"importContent")
+                }
+                response["exportFolder"]=UserDefaults.standard.string(forKey:"annotationExportFolder") ?? ""
+                response["readwiseConnected"] = !(self.localCredential("readwise-reader-token") ?? "").isEmpty
+                response["deviceConnected"] = !self.syncAuthKey().isEmpty
+                self.send("annotationData",response)
+                if let content=response["content"] as? String,action == "export" || action == "backup" {
+                    self.saveAnnotationExport(content,format:action == "backup" ? "json" : (body["format"] as? String ?? "markdown"))
+                }
+            }
+        }
+    }
+
+    private func saveAnnotationExport(_ content:String,format:String,title:String="Shelf Highlights") {
+        let panel=NSSavePanel(); let safeTitle=String(title.replacingOccurrences(of:#"[/\\:]"#,with:"-",options:.regularExpression).prefix(120)); panel.nameFieldStringValue="\(safeTitle).\(format == "markdown" ? "md" : format)"
+        panel.canCreateDirectories=true
+        if let folder=UserDefaults.standard.string(forKey:"annotationExportFolder"),!folder.isEmpty { panel.directoryURL=URL(fileURLWithPath:folder) }
+        panel.beginSheetModal(for:window) { [weak self] response in
+            guard response == .OK,let url=panel.url else { return }
+            do {
+                try content.write(to:url,atomically:true,encoding:.utf8)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                self?.notify("Highlights exported.")
+            } catch { self?.notify("Could not save the export. Check folder access.") }
+        }
+    }
+
+    private func annotationMaintenance() {
+        // Live processes and reminders run only while Shelf is open.
+        let settings=UserDefaults.standard.dictionary(forKey:"annotationSettings") ?? [:]
+        if settings["autoSync"] as? Bool == true { annotationRequest(["action":"sync","automatic":true]) }
+        let dayFormatter=DateFormatter(); dayFormatter.dateFormat="yyyy-MM-dd"
+        let day=dayFormatter.string(from:Date())
+        if settings["reminders"] as? Bool == true, activeReader == nil {
+            let formatter=DateFormatter(); formatter.dateFormat="HH:mm"
+            if formatter.string(from:Date()) >= (settings["reminderTime"] as? String ?? "09:00"),
+               UserDefaults.standard.string(forKey:"annotationReminderDay") != String(day) {
+                annotationQueue.async { [weak self] in
+                    guard let self else { return }
+                    let response=self.annotationResult(["action":"list"])
+                    if let review=response["review"] as? [[String:Any]],!review.isEmpty {
+                        DispatchQueue.main.async {
+                            UserDefaults.standard.set(String(day),forKey:"annotationReminderDay")
+                            self.notify("Your highlight review is ready. Open Review whenever you like.")
+                        }
+                    }
+                }
+            }
+        }
+        if settings["scheduledExport"] as? Bool == true,
+           let folder=UserDefaults.standard.string(forKey:"annotationExportFolder"),!folder.isEmpty {
+            annotationQueue.async { [weak self] in
+                guard let self else { return }
+                let format=settings["exportFormat"] as? String ?? "markdown"
+                let response=self.annotationResult(["action":"export","format":format])
+                guard let content=response["content"] as? String else { return }
+                let digest=SHA256.hash(data:Data(content.utf8)).map{String(format:"%02x",$0)}.joined()
+                guard UserDefaults.standard.string(forKey:"annotationLastExport") != digest else { return }
+                let requested=settings["filename"] as? String ?? "Highlights"
+                let name=requested.replacingOccurrences(of:"{title}",with:"All books").replacingOccurrences(of:"{date}",with:String(day))
+                let safe=String(name.replacingOccurrences(of:#"[^\p{L}\p{N} _-]"#,with:"_",options:.regularExpression).prefix(100))
+                let url=URL(fileURLWithPath:folder).appendingPathComponent("Shelf-\(safe)-\(digest.prefix(12)).\(format == "markdown" ? "md" : format)")
+                do {
+                    // Content-addressed names never overwrite a user's edited note.
+                    if !FileManager.default.fileExists(atPath:url.path) {
+                        try content.write(to:url,atomically:true,encoding:.utf8)
+                        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                    }
+                    UserDefaults.standard.set(digest,forKey:"annotationLastExport")
+                } catch { DispatchQueue.main.async { self.notify("Scheduled annotation export needs folder access.") } }
             }
         }
     }
@@ -2229,7 +2559,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         Library: \(libraryPath)
         Import folder: \(importPath)
 
-        Contents: current dashboard state and the single most recent distinct issue from the last 7 days.
+        Contents: current dashboard state and up to 50 distinct issues from the last 7 days.
         Repeated failures are counted once. Full logs, book contents, and credentials are not included.
         Passwords, auth values, tokens, and secret fields are redacted. The bundle is created locally;
         it is not sent to an LLM or any other service.
@@ -2262,18 +2592,18 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 }
             }
         }
-        let issueLines=uniqueIssues.values.sorted { $0.latest > $1.latest }.prefix(1).map { issue in
+        let issueLines=uniqueIssues.values.sorted { $0.latest > $1.latest }.prefix(50).map { issue in
             issue.count > 1 ? "Repeated \(issue.count) times: \(issue.message)" : issue.message
         }
         let report=issueLines.isEmpty ? "No recent errors found in the collected log tails." : issueLines.joined(separator:"\n")
-        var exportedIssueCount=issueLines.isEmpty ? 0 : 1
+        var exportedIssueCount=issueLines.count
         try report.write(to:root.appendingPathComponent("ERRORS.txt"),atomically:true,encoding:.utf8)
         if !additionalText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
             let summaries=additionalText.components(separatedBy:.newlines).filter { line in
                 matcher.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) != nil
             }.map(compactDiagnosticLine)
             var seen=Set<String>()
-            let distinct=summaries.filter { seen.insert(diagnosticFingerprint($0)).inserted }.prefix(1)
+            let distinct=summaries.filter { seen.insert(diagnosticFingerprint($0)).inserted }.prefix(50)
             if !distinct.isEmpty {
                 try distinct.joined(separator:"\n").write(to:root.appendingPathComponent("USER-REPORTED-OUTPUT.txt"),atomically:true,encoding:.utf8)
                 exportedIssueCount += distinct.count
@@ -2327,7 +2657,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         var args=["--silent","--show-error","--max-time","5","--output","/dev/null","--write-out","%{http_code}"]
         if url.hasPrefix("https://") { args.append("--insecure") }
         if url.contains("/healthcheck") { args += ["--header","Accept: application/vnd.koreader.v1+json"] }
-        if auth { args += ["--config","-"] }
+        if auth { args += ["--anyauth","--config","-"] }
         args.append(url)
         let input:String?
         if auth, let password=Optional(serverPassword()),!password.isEmpty {

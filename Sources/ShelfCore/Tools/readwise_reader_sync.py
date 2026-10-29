@@ -186,7 +186,7 @@ def sync_endpoint(root: str, token: str, username: str, doc: str, progress: floa
         return None
 
 
-def create_highlight(token: str, title: str, author: str, text: str) -> dict:
+def create_highlight(token: str, title: str, author: str, text: str, note: str = "", tags: list | None = None) -> dict:
     items = documents(token, "epub")
     target = {"title": title, "author": author}
     book = match_book(target, [{"id": i, "title": str(item.get("title", "")),
@@ -199,7 +199,7 @@ def create_highlight(token: str, title: str, author: str, text: str) -> dict:
         raise RuntimeError("The matching Readwise Reader book has no document ID.")
     request = urllib.request.Request(
         "https://readwise.io/api/v3/save/",
-        data=json.dumps({"parent_id": parent, "content": text}).encode(),
+        data=json.dumps({"parent_id": parent, "content": text, "notes": note, "tags": tags or [], "saved_using":"Shelf"}).encode(),
         headers={"Authorization": f"Token {token}", "Content-Type": "application/json"},
         method="POST",
     )
@@ -237,8 +237,8 @@ def main() -> int:
         username = str(payload.get("username", "")).strip()
         sync_key = str(payload.get("syncKey", "")).strip()
         endpoints = [str(value).rstrip("/") for value in payload.get("syncEndpoints", []) if value]
-        if not token or not username or not sync_key:
-            raise RuntimeError("Add Readwise and KOReader Sync credentials in Shelf first.")
+        if not token:
+            raise RuntimeError("Connect Readwise in Shelf first.")
         local = book_rows()
         reader_books = documents(token, "epub")
         matches = []
@@ -257,7 +257,7 @@ def main() -> int:
         pushed = 0
         newer_local = 0
         failures = 0
-        for item in matches:
+        for item in (matches if payload.get("importProgress", True) and sync_key and username else []):
             progress = item.get("reading_progress")
             if not isinstance(progress, (int, float)) or not 0 <= progress <= 1:
                 continue
@@ -278,7 +278,7 @@ def main() -> int:
             elif item_newer:
                 newer_local += 1
         highlights_by_book: dict[str, list[dict]] = {}
-        if by_reader_id:
+        if by_reader_id and payload.get("importHighlights", True):
             for highlight in documents(token, "highlight"):
                 parent = str(highlight.get("parent_id", ""))
                 book = by_reader_id.get(parent)
@@ -286,7 +286,7 @@ def main() -> int:
                 if not book or not text:
                     continue
                 bucket = highlights_by_book.setdefault(str(book["id"]), [])
-                bucket.append({"text": text[:4096], "note": str(highlight.get("notes") or "")[:1200],
+                bucket.append({"title":book["title"],"author":book["author"],"text": text[:4096], "note": str(highlight.get("notes") or "")[:1200],
                                "id": str(highlight.get("id", ""))})
         print(json.dumps({"ok": True, "matched": len(matches), "progressPushed": pushed,
                           "newerLocalProgress": newer_local, "syncFailures": failures,

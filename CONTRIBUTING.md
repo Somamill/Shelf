@@ -27,6 +27,8 @@ Open `Shelf.xcodeproj` in Xcode or run `Scripts/build-and-install.sh` on macOS. 
 
 - Build the macOS target with Xcode.
 - Run `node --check Resources/Dashboard/app.js`.
+- Run `python3 -m unittest discover -s Tests/Python -v` for annotations, Studio services, and bridge failure handling.
+- Optionally run `python3 Tests/Dashboard/test_annotations_ui.py` with Playwright and Chromium for dashboard and passage-anchor checks.
 - Run `python3 -m py_compile Sources/ShelfCore/Tools/*.py`.
 - Scan for personal paths, local IPs, credentials, private logs, and generated app bundles.
 - Describe the integrations you exercised and any unavailable services.
