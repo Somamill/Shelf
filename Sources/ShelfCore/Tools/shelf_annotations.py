@@ -348,6 +348,7 @@ class Library:
     def archive_readwise(self,item):
         item.update(archived=True,remoteDeleted=True,updatedAt=now())
         self.db.execute('UPDATE highlights SET value=? WHERE id=?',(json.dumps(item,ensure_ascii=False),item['id']))
+        self.db.execute("DELETE FROM queue WHERE highlight=? AND status NOT IN ('sending','sent')",(item['id'],))
 
     def sync(self, credentials, automatic=False):
         s=self.settings()

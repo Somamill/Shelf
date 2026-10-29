@@ -120,11 +120,13 @@ class ReadwiseImportTests(unittest.TestCase):
     def test_remote_deletions_archive_instead_of_destroying_notes(self):
         self.pull(response([book()]))
         item=self.lib.items()[0]; self.lib.update(item['id'],{'note':'Keep me'})
+        self.lib.enqueue(item['id'],'readwise')
         self.time.return_value+=901
         self.pull(response([{'user_book_id':1,'is_deleted':True}]))
         item=self.lib.items()[0]
         self.assertTrue(item['archived']); self.assertTrue(item['remoteDeleted'])
         self.assertEqual(item['note'],'Keep me')
+        self.assertEqual(self.lib.queue(),[])
 
     def test_automatic_pause_and_poll_interval_make_no_requests(self):
         self.lib.save_settings({'readwiseAutoImport':False})
