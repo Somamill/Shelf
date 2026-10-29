@@ -71,7 +71,15 @@ jobs:
       - name: Smoke-test updater-enabled app startup
         run: |
           APP="$RUNNER_TEMP/ShelfCI/Build/Products/Release/Shelf.app"
-          "$APP/Contents/MacOS/Shelf" -SUEnableAutomaticChecks NO > "$RUNNER_TEMP/shelf-startup.log" 2>&1 &
+          mkdir -p "$RUNNER_TEMP/shelf-smoke/library" "$RUNNER_TEMP/shelf-smoke/state" "$RUNNER_TEMP/shelf-smoke/logs"
+          touch "$RUNNER_TEMP/shelf-smoke/library/metadata.db"
+          python3 - <<'PYSMOKE'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'shelf-smoke'
+          config={'setupCompleted':True,'connectionsConfigured':True,'paths':{k:str(root/v) for k,v in {'booksRoot':'.','library':'library','state':'state','logs':'logs','scripts':'scripts','import':'inbox'}.items()},'tools':{'docker':'/usr/bin/false','adb':'/usr/bin/false','brew':'/usr/bin/false'}}
+          (root/'config.json').write_text(json.dumps(config))
+          PYSMOKE
+          SHELF_CONFIG="$RUNNER_TEMP/shelf-smoke/config.json" "$APP/Contents/MacOS/Shelf" -SUEnableAutomaticChecks NO > "$RUNNER_TEMP/shelf-startup.log" 2>&1 &
           APP_PID=$!
           trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
           for i in {1..30}; do
@@ -79,8 +87,9 @@ jobs:
             if ! kill -0 "$APP_PID" 2>/dev/null; then cat "$RUNNER_TEMP/shelf-startup.log"; exit 1; fi
             sleep 1
           done
-          grep -q 'dashboard page loaded' "$RUNNER_TEMP/shelf-startup.log" || { cat "$RUNNER_TEMP/shelf-startup.log"; exit 1; }
+          grep -q 'dashboard page loaded' "$RUNNER_TEMP/shelf-startup.log" || { cat "$RUNNER_TEMP/shelf-startup.log"; sample "$APP_PID" 3 -file "$RUNNER_TEMP/shelf-sample.txt"; head -140 "$RUNNER_TEMP/shelf-sample.txt"; exit 1; }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: generated-xcode-project
           path: Shelf.xcodeproj/project.pbxproj

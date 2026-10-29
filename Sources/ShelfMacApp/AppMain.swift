@@ -264,6 +264,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         NSApp.setActivationPolicy(.regular)
         if let key=Bundle.main.object(forInfoDictionaryKey:"SUPublicEDKey") as? String, Data(base64Encoded:key)?.count == 32 {
             shelfUpdater=SPUStandardUpdaterController(startingUpdater:true,updaterDelegate:nil,userDriverDelegate:nil)
+            NSLog("Shelf: signed updater initialized")
         }
         buildMenu()
         let config = WKWebViewConfiguration()
