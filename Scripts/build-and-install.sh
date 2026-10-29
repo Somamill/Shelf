@@ -5,9 +5,14 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="$HOME/Library/Application Support/Shelf"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 BUILD_ROOT="/tmp/ShelfBuild-$UID"
+APP_NAME="Shelf"
+if [[ "${SHELF_DEVELOPMENT_BUILD:-0}" == 1 ]]; then
+  APP_NAME="Shelf Dev"
+  BUILD_ROOT="$BUILD_ROOT-Dev"
+fi
 DERIVED_DATA="$BUILD_ROOT/DerivedData"
 APPLICATIONS_DIR="${SHELF_APPLICATIONS_DIR:-/Applications}"
-APP="$APPLICATIONS_DIR/Shelf.app"
+APP="$APPLICATIONS_DIR/$APP_NAME.app"
 
 # Prefer a stable Apple identity; otherwise create a persistent local Shelf
 # identity once. Ad-hoc signatures change on every build and re-trigger ACLs.
@@ -80,7 +85,7 @@ PY
 
 PROJECT_FILE="$PROJECT_ROOT/Shelf.xcodeproj/project.pbxproj"
 "$PROJECT_ROOT/Scripts/download-python-runtime.sh"
-if [[ ! -f "$PROJECT_FILE" || "$PROJECT_ROOT/project.yml" -nt "$PROJECT_FILE" ]]; then
+if [[ ! -f "$PROJECT_FILE" || ( "$PROJECT_ROOT/project.yml" -nt "$PROJECT_FILE" && "${SHELF_DEVELOPMENT_BUILD:-0}" != 1 ) ]]; then
   if ! command -v xcodegen >/dev/null 2>&1; then
     echo "Install XcodeGen to regenerate the project after editing project.yml." >&2
     exit 1
@@ -88,12 +93,10 @@ if [[ ! -f "$PROJECT_FILE" || "$PROJECT_ROOT/project.yml" -nt "$PROJECT_FILE" ]]
   xcodegen generate --spec "$PROJECT_ROOT/project.yml" --project "$PROJECT_ROOT"
 fi
 
-osascript -e 'tell application "Shelf" to quit' >/dev/null 2>&1 || true
 if xcodebuild -version >/dev/null 2>&1; then
   xcodebuild -project "$PROJECT_ROOT/Shelf.xcodeproj" -scheme Shelf -configuration Release \
     -derivedDataPath "$DERIVED_DATA" CODE_SIGNING_ALLOWED=NO build
   BUILT_APP="$DERIVED_DATA/Build/Products/Release/Shelf.app"
-  codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILT_APP"
 else
   BUILT_APP="$BUILD_ROOT/Manual/Shelf.app"
   CONTENTS="$BUILT_APP/Contents"
@@ -144,13 +147,53 @@ with open(sys.argv[2], 'rb') as f: info=plistlib.load(f)
 info.update(custom)
 with open(sys.argv[2], 'wb') as f: plistlib.dump(info,f)
 PYINFO
-  codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILT_APP"
 fi
 if [[ ! -d "$BUILT_APP" ]]; then
   echo "Xcode completed without creating Shelf.app." >&2
   exit 1
 fi
+if [[ "${SHELF_DEVELOPMENT_BUILD:-0}" == 1 ]]; then
+  /usr/bin/python3 - "$BUILT_APP/Contents/Info.plist" <<'PYDEV'
+import plistlib,sys
+path=sys.argv[1]
+with open(path,'rb') as f: info=plistlib.load(f)
+info.update(CFBundleIdentifier='app.shelf.dashboard.dev',CFBundleName='Shelf Dev',
+            CFBundleDisplayName='Shelf Dev',SUEnableAutomaticChecks=False,SUAutomaticallyUpdate=False)
+info.pop('SUPublicEDKey',None)
+info['CFBundleURLTypes']=[{'CFBundleURLName':'app.shelf.highlights.dev','CFBundleURLSchemes':['shelf-dev']}]
+with open(path,'wb') as f: plistlib.dump(info,f)
+PYDEV
+fi
+codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILT_APP"
+codesign --verify --deep --strict "$BUILT_APP"
+if [[ "${SHELF_BUILD_ONLY:-0}" == 1 ]]; then
+  echo "Built and verified $BUILT_APP"
+  exit 0
+fi
 mkdir -p "$APPLICATIONS_DIR"
+if [[ "${SHELF_DEVELOPMENT_BUILD:-0}" == 1 ]]; then
+  # Stage and verify before stopping the running development app. Never quit Shelf.
+  STAGED_APP="$(mktemp -d "$APPLICATIONS_DIR/.Shelf-Dev.XXXXXX")"
+  trap 'rm -rf "$STAGED_APP"' EXIT
+  ditto "$BUILT_APP" "$STAGED_APP/Shelf Dev.app"
+  codesign --verify --deep --strict "$STAGED_APP/Shelf Dev.app"
+  osascript -e 'tell application id "app.shelf.dashboard.dev" to quit' >/dev/null 2>&1 || true
+  if [[ -e "$APP" ]]; then
+    BACKUP_APP="$APPLICATIONS_DIR/Shelf Dev.previous.app"
+    rm -rf "$BACKUP_APP"
+    mv "$APP" "$BACKUP_APP"
+  fi
+  if ! mv "$STAGED_APP/Shelf Dev.app" "$APP"; then
+    if [[ -n "${BACKUP_APP:-}" ]]; then mv "$BACKUP_APP" "$APP"; fi
+    exit 1
+  fi
+  rm -rf "$STAGED_APP"
+  trap - EXIT
+  open -a "$APP"
+  echo "Installed $APP (release updates disabled; source sync manages this app)"
+  exit 0
+fi
+osascript -e 'tell application "Shelf" to quit' >/dev/null 2>&1 || true
 if [[ -e "$APP" ]]; then
   osascript -e "tell application \"Finder\" to delete POSIX file \"$APP\""
 fi
