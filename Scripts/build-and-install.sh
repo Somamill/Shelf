@@ -189,7 +189,7 @@ if [[ "${SHELF_DEVELOPMENT_BUILD:-0}" == 1 ]]; then
   fi
   rm -rf "$STAGED_APP"
   trap - EXIT
-  open -a "$APP"
+  if [[ "${SHELF_OPEN_AFTER_INSTALL:-1}" == 1 ]]; then open -a "$APP"; fi
   echo "Installed $APP (release updates disabled; source sync manages this app)"
   exit 0
 fi

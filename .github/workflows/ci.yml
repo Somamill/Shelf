@@ -112,3 +112,10 @@ jobs:
           assert info['SUAutomaticallyUpdate'] is False
           assert info['CFBundleURLTypes'][0]['CFBundleURLSchemes']==['shelf-dev']
           PYDEV
+          # Exercise real staging, replacement, and backup without opening the UI.
+          export SHELF_BUILD_ONLY=0 SHELF_OPEN_AFTER_INSTALL=0
+          export SHELF_APPLICATIONS_DIR="$RUNNER_TEMP/dev-applications"
+          bash Scripts/build-and-install.sh
+          bash Scripts/build-and-install.sh
+          codesign --verify --deep --strict "$SHELF_APPLICATIONS_DIR/Shelf Dev.app"
+          codesign --verify --deep --strict "$SHELF_APPLICATIONS_DIR/Shelf Dev.previous.app"
