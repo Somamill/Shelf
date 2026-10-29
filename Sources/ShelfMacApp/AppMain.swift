@@ -117,6 +117,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private let annotationQueue=DispatchQueue(label:"app.shelf.annotations",qos:.utility)
     private var pendingAnnotationImport:[String:Any]?
     private var pendingHighlightLink:String?
+    private var readwiseImportInProgress=false
+    private var lastReadwiseImportCheck=Date.distantPast
     private var refreshTimer: Timer?
     private var refreshInProgress = false
     private var updateCheckInProgress=false
@@ -309,8 +311,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         refresh()
         refreshTimer = Timer.scheduledTimer(withTimeInterval:60,repeats:true) { [weak self] _ in
-            guard let self, self.window.isVisible, !self.window.isMiniaturized else { return }
-            self.refresh()
+            guard let self else { return }
+            if self.window.isVisible && !self.window.isMiniaturized { self.refresh() }
             self.annotationMaintenance()
         }
     }
@@ -324,6 +326,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         NSLog("Shelf: dashboard page loaded")
         if let updater=shelfUpdater?.updater { NSLog("Shelf: signed updater ready=%d",updater.canCheckForUpdates) }
         annotationRequest(["action":"list"])
+        annotationMaintenance()
         if let key=pendingHighlightLink { pendingHighlightLink=nil; openHighlightLink(key) }
     }
 
@@ -393,7 +396,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "openCrossPointSettings": openCrossPointSettings()
         case "saveReadwiseReaderToken": saveReadwiseReaderToken(body["token"] as? String ?? "")
         case "disconnectReadwiseReader": disconnectReadwiseReader()
-        case "syncReadwiseReader": syncReadwiseReader()
+        case "syncReadwiseReader":
+            annotationRequest(["action":"importReadwise"])
+        case "syncReadwiseReaderProgress": syncReadwiseReader()
         case "openBookPlayer":
             if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.tortugapower.audiobookplayer") {
                 NSWorkspace.shared.open(url)
@@ -1295,6 +1300,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 self.send("readwiseTokenSaved",["connected":true])
                 self.notify("Readwise access token verified and saved locally on this Mac.")
                 self.refresh()
+                self.annotationRequest(["action":"importReadwise"])
             }
         }
     }
@@ -1305,6 +1311,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         notify("Readwise Reader disconnected. Saved local highlights remain in Shelf.")
         refresh()
+        annotationRequest(["action":"list"])
     }
 
     private func syncReadwiseReader() {
@@ -1580,6 +1587,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func annotationRequest(_ body:[String:Any]) {
         let action=body["action"] as? String ?? "list"
+        if action == "importReadwise" {
+            guard !readwiseImportInProgress else { return }
+            readwiseImportInProgress=true
+            lastReadwiseImportCheck=Date()
+        }
         if action == "chooseImport" || action == "chooseRestore" {
             let panel=NSOpenPanel(); panel.canChooseDirectories=false; panel.allowsMultipleSelection=false
             panel.allowedContentTypes=[.json,.plainText,.commaSeparatedText]
@@ -1611,6 +1623,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }; return
         }
         if action == "open" {
+            if let item=body["item"] as? [String:Any],(item["bookId"] as? Int ?? 0)==0,
+               let location=item["location"] as? [String:Any],let document=location["document"] as? String,
+               let url=URL(string:document),url.scheme == "https",url.host == "readwise.io" {
+                NSWorkspace.shared.open(url); return
+            }
             guard let item=body["item"] as? [String:Any],let book=item["bookId"] as? Int,book>0 else {
                 notify("Link this highlight to a Calibre book first."); return
             }
@@ -1620,7 +1637,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let self else { return }
             self.migrateAnnotations()
             var payload=body; payload.removeValue(forKey:"type"); payload["all"]=true
-            if action == "sync" {
+            if action == "sync" || action == "importReadwise" {
                 payload["credentials"]=["token":self.localCredential("readwise-reader-token") ?? "",
                     "syncKey":self.syncAuthKey(),"username":self.username,
                     "crosspoint":self.service("crosspointApi",fallback:"http://127.0.0.1:17303")]
@@ -1628,6 +1645,15 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             var response=self.annotationResult(payload)
             response["action"]=action
             DispatchQueue.main.async {
+                if action == "importReadwise" {
+                    self.readwiseImportInProgress=false
+                    if response["readwiseMore"] as? Bool == true {
+                        DispatchQueue.main.asyncAfter(deadline:.now()+4.2) { [weak self] in
+                            guard let self,!(self.localCredential("readwise-reader-token") ?? "").isEmpty else { return }
+                            self.annotationRequest(["action":"importReadwise","automatic":true])
+                        }
+                    }
+                }
                 if response["ok"] as? Bool != true {
                     self.notify(response["error"] as? String ?? "Annotation operation failed.")
                 }
@@ -1667,6 +1693,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func annotationMaintenance() {
         // Live processes and reminders run only while Shelf is open.
         let settings=UserDefaults.standard.dictionary(forKey:"annotationSettings") ?? [:]
+        if settings["readwiseAutoImport"] as? Bool != false,
+           !(localCredential("readwise-reader-token") ?? "").isEmpty,
+           Date().timeIntervalSince(lastReadwiseImportCheck)>=60 {
+            annotationRequest(["action":"importReadwise","automatic":true])
+        }
         if settings["autoSync"] as? Bool == true { annotationRequest(["action":"sync","automatic":true]) }
         let dayFormatter=DateFormatter(); dayFormatter.dateFormat="yyyy-MM-dd"
         let day=dayFormatter.string(from:Date())

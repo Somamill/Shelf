@@ -1,5 +1,5 @@
 """Optional Chromium smoke test: requires Playwright and system Chromium. No accounts used."""
-import json,sys,tempfile,http.server,threading,functools
+import json,sys,tempfile,http.server,threading,functools,io
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 root=Path(__file__).resolve().parents[2]
@@ -36,7 +36,13 @@ with tempfile.TemporaryDirectory() as tmp:
     except ValueError as e:return {'ok':False,'error':str(e)}
    if payload.get('type')!='annotations': return None
    if payload['action'] in ('chooseImport','chooseRestore','chooseExportFolder','open'): return None
-   result=dispatch(lib,payload);result['action']=payload['action'];return result
+   if payload['action']=='importReadwise':
+    fixture={'results':[{'user_book_id':42,'title':'Readwise article','source':'reader','category':'articles',
+                         'highlights':[{'id':420,'text':'A passage from Readwise','note':'Imported note'}]}], 'nextPageCursor':None}
+    with patch('shelf_annotations.urllib.request.urlopen',return_value=io.BytesIO(json.dumps(fixture).encode())):
+     result=dispatch(lib,{**payload,'credentials':{'token':'fixture-token'}})
+   else: result=dispatch(lib,payload)
+   result['action']=payload['action'];result['readwiseConnected']=True;return result
   page.expose_function('nativeAnnotation',bridge)
   page.add_init_script('window.webkit={messageHandlers:{dashboard:{postMessage(o){window.nativeAnnotation(o).then(r=>{if(r){if(o.type==="studio")window.studioData(r);else window.annotationData(r)}})}}}};')
   server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(http.server.SimpleHTTPRequestHandler,directory=str(root/'Resources/Dashboard')))
@@ -61,6 +67,7 @@ with tempfile.TemporaryDirectory() as tmp:
   page.get_by_role('button',name='Save collection',exact=True).click()
   page.get_by_role('button',name='★ Japanese notes').wait_for()
   page.locator('[data-page="preferences"]').click()
+  page.get_by_text('Sending highlights and Reader progress',exact=True).click()
   page.locator('[name="autoSync"]').check()
   page.locator('[name="dest_readwise"]').check()
   page.locator('[name="reviewSize"]').fill('3')
@@ -109,6 +116,13 @@ with tempfile.TemporaryDirectory() as tmp:
   page.get_by_role('button',name='Save passage to Highlights',exact=True).click()
   page.wait_for_function("studioState.item?.text==='A corrected spoken passage'")
   assert any(x['source']=='Podcast' for x in lib.items())
+  page.locator('[data-page="highlights"]').click()
+  page.locator('#annotationSearch').fill('')
+  page.locator('#readwiseImportButton').click()
+  page.wait_for_function("annotationState.items.some(x=>x.source==='Readwise'&&x.text==='A passage from Readwise')")
+  page.get_by_text('A passage from Readwise',exact=True).wait_for()
+  assert '1 Readwise highlights saved' in page.locator('#readwiseImportStatus').text_content()
+  assert page.get_by_role('button',name='Open in Readwise',exact=True).count()==1
   # Exercise the exact reader anchor code embedded in the native app.
   swift=(root/'Sources/ShelfMacApp/AppMain.swift').read_text()
   anchor=swift[swift.index('              function rangeAt('):]

@@ -121,6 +121,39 @@ in the annotation database or exported backup. No ebook file is uploaded by the
 annotation queue. Live provider behavior still requires validation with the
 user's accounts; the automated tests use controlled service responses.
 
+## Your full Readwise library
+
+In Connections, paste the access token from https://readwise.io/access_token and
+choose **Connect & import** once. If a token is already saved, Shelf reuses it
+automatically on the next launch. Never put the token in chat or a Git commit.
+Every book/article/source available through Readwise's Highlights export API is
+imported into Shelf's local annotation database, including titles absent from
+Calibre. Readwise Reader documents without highlights are not imported as books.
+
+The Highlights page shows one **Sync now** button, saved highlight count, import
+progress, last completed sync, and any retry/reconnection message. Shelf completes
+paginated imports in the background, resumes after interruption, and checks for
+changes every 15 minutes while running, including while minimized. Pause automatic
+imports in Settings. Quit Shelf to stop background work. The existing Reader
+progress tools and outgoing destinations are under an expandable advanced section;
+importing never queues or sends your highlights back to a provider.
+
+Imports merge using Readwise highlight IDs. Existing Reader imports are upgraded
+only when Readwise supplies an exact matching external ID. Unmodified source notes
+can update automatically; personal note edits are preserved and incoming changes
+are offered as conflicts. Remote deletions archive local entries rather than
+destroying personal notes. Local archives stay archived, tags/favorites remain
+available, and no ambiguous text/title matching is used to merge distinct passages.
+For highlights without a local book link, **Open in Readwise** opens the source.
+
+Each page and its cursor commit together. The incremental watermark advances only
+after the final page and overlaps the previous starting time to avoid missing
+changes during a long import. Rate limits and temporary failures retry with
+persisted backoff; rejected tokens ask for reconnection. Portable backups include
+the imported passages but exclude tokens and sync state. Restore therefore permits
+a safe complete reimport. Live account import still requires a connected Mac; tests
+use Readwise-shaped fixtures and do not establish access to your account.
+
 ## Reading settings
 
 Choose whether to remember appearance per book, restore the last position, and
