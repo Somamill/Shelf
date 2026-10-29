@@ -45,6 +45,29 @@ release build. It is safe to publish and is attached to each release as
 needed. Normal local builds without a configured public key leave the updater
 disabled and show an explicit setup message; they do not accept unsigned updates.
 
+### Without GitHub CLI
+
+Alternatively, on your Mac, generate the standard 32-byte Sparkle signing seed
+and copy it directly to your clipboard without displaying it:
+
+```sh
+umask 077
+key_dir="$HOME/Library/Application Support/Shelf/UpdaterSigning"
+mkdir -p "$key_dir"
+chmod 700 "$key_dir"
+if [ ! -e "$key_dir/ed25519.seed" ]; then
+  openssl rand -base64 32 > "$key_dir/ed25519.seed"
+fi
+chmod 600 "$key_dir/ed25519.seed"
+pbcopy < "$key_dir/ed25519.seed"
+```
+
+Open [the repository's new Actions secret page](https://github.com/Somamill/Shelf/settings/secrets/actions/new),
+name the secret `SPARKLE_PRIVATE_KEY`, and paste the clipboard into the value field.
+Do this only for the initial setup, not to replace an existing release key.
+Keep a secure backup of `ed25519.seed`. This alternative stores the original seed
+in an owner-only local file rather than Keychain. No key belongs in chat.
+
 ## Each future release
 
 1. Increase `MARKETING_VERSION` and the numeric `CURRENT_PROJECT_VERSION`.

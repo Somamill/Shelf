@@ -11,7 +11,7 @@
 - Python 3.13 is downloaded and checksum-verified by `Scripts/download-python-runtime.sh` for universal local builds.
 - Node.js only for the optional JavaScript syntax check.
 
-The embedded Python runtime is CPython from Astral’s python-build-standalone release; its upstream licenses remain in the app bundle under `Resources/PythonRuntime`. There are no third-party Swift packages in the current app. `ShelfCore` uses Foundation only and declares iOS 17 compatibility for future reuse.
+The embedded Python runtime is CPython from Astral’s python-build-standalone release; its upstream licenses remain in the app bundle under `Resources/PythonRuntime`. The macOS app uses the pinned Sparkle 2.10.1 binary package for signed updates. Swift Package Manager verifies its upstream checksum; local build tools use the same checksum. `ShelfCore` uses Foundation only and declares iOS 17 compatibility for future reuse.
 
 ## Optional integrations
 
