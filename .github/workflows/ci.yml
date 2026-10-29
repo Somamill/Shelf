@@ -94,3 +94,28 @@ jobs:
         with:
           name: generated-xcode-project
           path: Shelf.xcodeproj/project.pbxproj
+      - name: Build and verify isolated development app
+        env:
+          SHELF_DEVELOPMENT_BUILD: '1'
+          SHELF_SIGNING_IDENTITY: '-'
+          SHELF_BUILD_ONLY: '1'
+        run: |
+          bash Scripts/build-and-install.sh
+          python3 - <<'PYDEV'
+          import os,pathlib,plistlib
+          app=pathlib.Path('/tmp')/('ShelfBuild-'+str(os.getuid())+'-Dev')/'DerivedData/Build/Products/Release/Shelf.app'
+          with (app/'Contents/Info.plist').open('rb') as f: info=plistlib.load(f)
+          assert info['CFBundleIdentifier']=='app.shelf.dashboard.dev'
+          assert info['CFBundleDisplayName']=='Shelf Dev'
+          assert 'SUPublicEDKey' not in info
+          assert info['SUEnableAutomaticChecks'] is False
+          assert info['SUAutomaticallyUpdate'] is False
+          assert info['CFBundleURLTypes'][0]['CFBundleURLSchemes']==['shelf-dev']
+          PYDEV
+          # Exercise real staging, replacement, and backup without opening the UI.
+          export SHELF_BUILD_ONLY=0 SHELF_OPEN_AFTER_INSTALL=0
+          export SHELF_APPLICATIONS_DIR="$RUNNER_TEMP/dev-applications"
+          bash Scripts/build-and-install.sh
+          bash Scripts/build-and-install.sh
+          codesign --verify --deep --strict "$SHELF_APPLICATIONS_DIR/Shelf Dev.app"
+          codesign --verify --deep --strict "$SHELF_APPLICATIONS_DIR/Shelf Dev.previous.app"

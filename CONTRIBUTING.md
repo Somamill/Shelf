@@ -13,6 +13,10 @@
 
 ## Build
 
+For an automatically synced local Mac checkout and separate Shelf Dev app, use
+[Mac development setup](Documentation/DEVELOPMENT-SYNC.md). It preserves local
+work and pauses synchronization while you edit.
+
 Open `Shelf.xcodeproj` in Xcode or run `Scripts/build-and-install.sh` on macOS. `project.yml` is the XcodeGen spec. Regenerate the project with `xcodegen generate --spec project.yml --project Shelf.xcodeproj` after editing the spec.
 
 ## Change guidance
