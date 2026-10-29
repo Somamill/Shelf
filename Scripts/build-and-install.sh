@@ -106,7 +106,7 @@ else
     -emit-module-path "$RESOURCES/ShelfCore.swiftmodule" \
     -o "$RESOURCES/libShelfCore.dylib" "$PROJECT_ROOT/Sources/ShelfCore/ShelfCore/SetupModels.swift"
   swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx14.0" \
-    -framework AppKit -framework WebKit -I "$RESOURCES" -L "$RESOURCES" -lShelfCore \
+    -framework AppKit -framework WebKit -framework Vision -framework PDFKit -I "$RESOURCES" -L "$RESOURCES" -lShelfCore \
     -Xlinker -rpath -Xlinker '@executable_path/../Resources' \
     -o "$CONTENTS/MacOS/Shelf" "$PROJECT_ROOT/Sources/ShelfMacApp/AppMain.swift"
   cp "$PROJECT_ROOT/Resources/Dashboard/index.html" "$PROJECT_ROOT/Resources/Dashboard/style.css" \
@@ -118,13 +118,14 @@ else
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>Shelf</string>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>app.shelf.highlights</string><key>CFBundleURLSchemes</key><array><string>shelf</string></array></dict></array>
 <key>CFBundleIdentifier</key><string>app.shelf.dashboard</string>
 <key>CFBundleName</key><string>Shelf</string>
 <key>CFBundleDisplayName</key><string>Shelf</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-<key>CFBundleShortVersionString</key><string>0.1.42</string>
-<key>CFBundleVersion</key><string>43</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+<key>CFBundleVersion</key><string>44</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

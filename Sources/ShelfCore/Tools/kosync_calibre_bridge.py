@@ -304,6 +304,7 @@ def set_custom(column, book_id, value):
         "--with-library", SERVER,
         "--username", USERNAME,
         "--password", f"<f:{PASSFILE}>",
+        "--timeout=120",
         "set_custom",
         column_label,
         str(book_id),
@@ -366,6 +367,7 @@ def write_json_atomic(path, payload):
 
 def main():
 
+    os.makedirs(STATE, mode=0o700, exist_ok=True)
     lock_fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -770,6 +772,13 @@ def main():
             f"documents={found} matched={len(latest_by_book)} "
             f"updated={changed_books} unchanged={unchanged_books}"
         )
+
+    except subprocess.TimeoutExpired:
+        # Exception text includes the full command and may contain credentials.
+        # A timed-out write has an unknown outcome; reconcile on the next pass.
+        log(f"ERROR bridge command timed out after {COMMAND_TIMEOUT} seconds; "
+            "check Calibre and Docker availability before the next sync pass")
+        raise SystemExit(1) from None
 
     except Exception as e:
 

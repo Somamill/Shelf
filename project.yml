@@ -46,6 +46,10 @@ targets:
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/readwise_reader_sync.py
         buildPhase: resources
+      - path: Sources/ShelfCore/Tools/shelf_studio.py
+        buildPhase: resources
+      - path: Sources/ShelfCore/Tools/shelf_annotations.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/apple_books.py
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/open_library_book.py
@@ -75,11 +79,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.1.42
-        CURRENT_PROJECT_VERSION: 43
+        MARKETING_VERSION: 0.2.0
+        CURRENT_PROJECT_VERSION: 44
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Config/Shelf-Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Shelf
         INFOPLIST_KEY_CFBundleIconFile: AppIcon.icns
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.books

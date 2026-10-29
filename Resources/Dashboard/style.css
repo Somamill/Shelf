@@ -356,3 +356,35 @@ html[data-theme="dark"] .cover-fallback{background:linear-gradient(145deg,#10101
 /* Keep filters, menus, and toolbars from colliding in narrow app windows. */
 .section-head,.library-health-head{min-width:0;flex-wrap:wrap;gap:12px}.section-head>div,.library-health-head>div{min-width:0;flex:1 1 240px}.library-tools{min-width:0;max-width:100%;flex-wrap:wrap;justify-content:flex-end}.library-tools select{min-width:0;max-width:min(240px,42vw)}.book-shelf-filters{display:flex;max-width:100%;flex-wrap:wrap;gap:7px}.fulltext-panel{min-width:0;overflow:visible}.fulltext-panel .library-health-head{align-items:flex-start}.fulltext-actions{max-width:100%;flex-wrap:wrap;justify-content:flex-end}.fulltext-search{min-width:0;flex-wrap:wrap}.fulltext-search .book-search{min-width:min(220px,100%)}.all-book-card,.setup-card,.connect-card{min-width:0}
 @media(max-width:760px){.section-head{align-items:flex-start}.library-tools{width:100%;justify-content:flex-start}.library-tools select{max-width:100%;flex:1 1 150px}.fulltext-actions{width:100%;justify-content:flex-start}.fulltext-search .book-search{min-width:100%;width:100%}.book-shelf-filters button{flex:0 1 auto}}
+
+/* Annotation library uses the same calm surface colors as the bookshelf. */
+.annotation-toolbar,.annotation-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.annotation-toolbar label,.annotation-settings label,.annotation-dialog label{display:flex;flex-direction:column;gap:7px;font-size:12px;margin:10px 0;color:var(--muted)}
+.annotation-toolbar input,.annotation-toolbar select,.annotation-settings input,.annotation-settings select,.annotation-settings textarea,.annotation-dialog input,.annotation-dialog select,.annotation-dialog textarea,#annotationExportFormat{background:var(--glass-surface,#fff);color:var(--ink,#333);border:1px solid var(--line);border-radius:7px;padding:9px;min-width:100px;font:inherit}
+.annotation-check{flex-direction:row!important;align-items:center;gap:8px!important}.annotation-check input{min-width:0!important}
+.annotation-list{display:flex;flex-direction:column;gap:14px}.annotation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.annotation-card,.annotation-job,.annotation-settings fieldset{background:var(--glass-surface,#fff);border:1px solid var(--line);border-radius:12px;padding:20px;margin:12px 0;overflow-wrap:anywhere}
+.annotation-card{border-inline-start:3px solid #d0b855}.annotation-card[data-color="green"]{border-inline-start-color:#46957b}.annotation-card[data-color="blue"]{border-inline-start-color:#628dc7}.annotation-card[data-color="pink"]{border-inline-start-color:#b96c92}.annotation-archived{opacity:.65}
+.annotation-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px}.annotation-meta span,.annotation-job small{color:var(--muted)}
+.annotation-card blockquote{white-space:pre-wrap;margin:20px 0;font-size:16px;line-height:1.8}.annotation-note{white-space:pre-wrap;border-top:1px solid var(--line);padding-top:12px;font-size:13px;line-height:1.6}
+.annotation-tags{display:flex;gap:8px;flex-wrap:wrap}.annotation-tags span{font-size:11px;color:var(--muted)}.annotation-job{display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:12px}.annotation-job p{margin:8px 0}
+.annotation-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.annotation-settings fieldset{min-width:0;margin:0}.annotation-settings legend{font-weight:600;font-size:15px}.annotation-settings p{font-size:12px;line-height:1.7}.annotation-settings button{margin:6px}.annotation-destination{border-top:1px solid var(--line);padding:9px 0}.annotation-destination small{font-size:11px;color:var(--muted)}
+.annotation-dialog{background:var(--glass-surface,#fff);color:var(--ink,#333);border:1px solid var(--line);border-radius:14px;width:min(650px,90vw);max-height:85vh;overflow:auto;padding:24px;box-shadow:0 20px 80px #0007}.annotation-dialog::backdrop{background:#0008}.annotation-dialog p{font-size:13px;line-height:1.6}.annotation-dialog pre{white-space:pre-wrap;font-size:12px}.annotation-dialog button{margin:8px 4px}.annotation-dialog textarea{width:100%}.annotation-dialog .hint{color:var(--muted)}
+.taskbar{overflow-x:auto;justify-content:flex-start}.taskbar a{flex:1 0 64px}
+#annotationReview{max-width:840px;margin:auto}
+
+.annotation-settings{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+.annotation-settings>button[type="submit"]{grid-column:1/-1;justify-self:start;align-self:start;min-width:150px}
+.annotation-week{display:flex;gap:12px;flex-wrap:wrap}.annotation-week p{flex-basis:100%;margin-bottom:0}
+html .annotation-card[data-color="yellow"]{border-inline-start-color:#d0b855}html .annotation-card[data-color="green"]{border-inline-start-color:#46957b}html .annotation-card[data-color="blue"]{border-inline-start-color:#628dc7}html .annotation-card[data-color="pink"]{border-inline-start-color:#b96c92}
+@media(max-width:850px){.annotation-settings{grid-template-columns:1fr}}
+
+.studio-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+#studio .annotation-card p{font-size:13px;line-height:1.7}.studio-fields label{display:flex;flex-direction:column;gap:8px;margin:14px 0;font-size:13px;color:var(--muted)}
+.studio-fields input,.studio-fields textarea,.studio-fields select{width:100%;background:var(--glass-surface);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:10px;font:inherit}
+.studio-fields .annotation-check{flex-direction:row}.studio-fields input[type="checkbox"]{width:auto}
+.studio-answer{white-space:pre-wrap;line-height:1.8!important}.studio-fields textarea{resize:vertical}
+#studioStatus[aria-busy="true"]{padding:15px;border:1px solid var(--line);border-radius:10px;color:var(--blue)}
+#studioNotionPreview{margin-top:20px}#studioNotionPreview p{white-space:pre-wrap}
+#studio button:disabled{opacity:.5;cursor:wait}#studio summary{cursor:pointer;padding:12px 0}
+@media(max-width:900px){.studio-grid{grid-template-columns:1fr}}
