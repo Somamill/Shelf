@@ -243,7 +243,7 @@ class Library:
     def import_readwise(self,token,automatic=False):
         """Commit one export page with its cursor; resume without re-uploading anything."""
         if not token: raise ValueError('Connect Readwise once in Connections to import your library.')
-        if automatic and (not self.settings()['readwiseAutoImport'] or not self.settings()['importReadwise']): return {}
+        if automatic and not self.settings()['readwiseAutoImport']: return {}
         state=self.readwise_state()
         fingerprint=hashlib.sha256(token.encode()).hexdigest()
         if state.get('accountKey')!=fingerprint: state={'accountKey':fingerprint}

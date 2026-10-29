@@ -1694,7 +1694,6 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         // Live processes and reminders run only while Shelf is open.
         let settings=UserDefaults.standard.dictionary(forKey:"annotationSettings") ?? [:]
         if settings["readwiseAutoImport"] as? Bool != false,
-           settings["importReadwise"] as? Bool != false,
            !(localCredential("readwise-reader-token") ?? "").isEmpty,
            Date().timeIntervalSince(lastReadwiseImportCheck)>=60 {
             annotationRequest(["action":"importReadwise","automatic":true])
