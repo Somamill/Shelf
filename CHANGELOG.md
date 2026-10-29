@@ -1,3 +1,10 @@
+## 0.2.1
+
+- Add Sparkle in-app updates with user-controlled automatic checks and installation preferences.
+- Verify update archives and feeds using Ed25519 signatures; refuse missing signing setup, silent key changes, and replacement of published releases.
+- Publish the installer, signed update archive, release notes, and appcast together; retain one-time manual installation for older versions without an updater.
+- Replace the local-project rebuild button with the signed Shelf update flow.
+
 ## 0.2.0
 
 - Add a local highlight library with searchable passages, notes, tags, favorites, archives, saved collections, and optional daily review.

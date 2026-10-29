@@ -23,6 +23,44 @@ jobs:
         with:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
+      - name: Prepare verified updater signing
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo 'Configure SPARKLE_PRIVATE_KEY using Scripts/setup-updater-signing.sh on the developer Mac.' >&2; exit 1; }
+          umask 077
+          python3 - <<'PYKEY'
+          import os,base64,sys
+          try:
+              valid=len(base64.b64decode(os.environ.get('SPARKLE_PRIVATE_KEY','').strip(),validate=True))==32
+          except Exception:
+              valid=False
+          if not valid:
+              sys.exit('Invalid Sparkle signing seed; no key was printed.')
+          PYKEY
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
+          swift Scripts/configure-updater.swift Config/Shelf-Info.plist < "$RUNNER_TEMP/sparkle.key" > "$RUNNER_TEMP/sparkle-public-key.txt"
+          bash Scripts/download-sparkle.sh "$RUNNER_TEMP/Sparkle"
+          gh release view --repo "$GITHUB_REPOSITORY" --json tagName,assets > "$RUNNER_TEMP/previous-release.json"
+          python3 - "$RUNNER_TEMP/previous-release.json" "$RELEASE_TAG" <<'PYVERSION'
+          import json,re,sys
+          previous=json.load(open(sys.argv[1]))
+          def version(s):
+              if not re.fullmatch(r'v\d+\.\d+\.\d+',s):sys.exit('Use a new stable vMAJOR.MINOR.PATCH tag')
+              return tuple(map(int,s[1:].split('.')))
+          if version(sys.argv[2])<=version(previous['tagName']):sys.exit('Refusing to publish a version older than or equal to the current release')
+          has_key=any(a['name']=='sparkle-public-key.txt' for a in previous['assets'])
+          if not has_key and version(previous['tagName'])>(0,2,0):sys.exit('Previous updater signing key is missing; investigate rather than rotating it silently')
+          PYVERSION
+          if python3 - "$RUNNER_TEMP/previous-release.json" <<'PYPREV'
+          import json,sys
+          sys.exit(0 if any(a['name']=='sparkle-public-key.txt' for a in json.load(open(sys.argv[1]))['assets']) else 1)
+          PYPREV
+          then
+            gh release download --repo "$GITHUB_REPOSITORY" --pattern sparkle-public-key.txt --dir "$RUNNER_TEMP/previous-updater"
+            cmp "$RUNNER_TEMP/previous-updater/sparkle-public-key.txt" "$RUNNER_TEMP/sparkle-public-key.txt" || { echo 'Update signing key changed. Use a supported key-rotation plan instead.' >&2; exit 1; }
+          fi
       - name: Check Apple signing secrets
         id: signing-check
         env:
@@ -118,6 +156,18 @@ jobs:
           spctl --assess --type execute --verbose "$APP_PATH"
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip"
           Scripts/package-dmg.sh "$APP_PATH" "$RUNNER_TEMP/Shelf.dmg"
+      - name: Sign update archive and appcast
+        run: |
+          mkdir -p "$RUNNER_TEMP/updater"
+          cp "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip" "$RUNNER_TEMP/updater/"
+          python3 - "$RUNNER_TEMP/updater/Shelf-${RELEASE_TAG}.md" <<'PYNOTES'
+          import pathlib,sys
+          text=pathlib.Path('CHANGELOG.md').read_text()
+          section=text.split('\n## ',1)[0]
+          pathlib.Path(sys.argv[1]).write_text(section+'\n')
+          PYNOTES
+          "$RUNNER_TEMP/Sparkle/bin/generate_appcast" --ed-key-file "$RUNNER_TEMP/sparkle.key" --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/" --link "https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG" "$RUNNER_TEMP/updater"
+          "$RUNNER_TEMP/Sparkle/bin/sign_update" --verify --ed-key-file "$RUNNER_TEMP/sparkle.key" "$RUNNER_TEMP/updater/appcast.xml"
       - name: Publish app and checksum to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,8 +193,14 @@ jobs:
           EOF
           fi
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
+            gh release create "$RELEASE_TAG" --draft --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true || { echo "Refusing to overwrite a published update" >&2; exit 1; }
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
           gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf-${RELEASE_TAG}.zip" "$RUNNER_TEMP/Shelf.dmg" --repo "$GITHUB_REPOSITORY" --clobber
           shasum -a 256 "$RUNNER_TEMP/Shelf.dmg" | awk '{print $1 "  Shelf.dmg"}' > "$RUNNER_TEMP/Shelf.dmg.sha256"
           gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Shelf.dmg.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/updater/appcast.xml" "$RUNNER_TEMP/updater/Shelf-${RELEASE_TAG}.md" "$RUNNER_TEMP/sparkle-public-key.txt" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Remove temporary update signing seed
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sparkle.key"

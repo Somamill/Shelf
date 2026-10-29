@@ -1,8 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleURLTypes</key><array><dict>
-<key>CFBundleURLName</key><string>app.shelf.highlights</string>
-<key>CFBundleURLSchemes</key><array><string>shelf</string></array>
-</dict></array>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.shelf.highlights</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>shelf</string>
+			</array>
+		</dict>
+	</array>
+	<key>SUFeedURL</key>
+	<string>https://github.com/Somamill/Shelf/releases/latest/download/appcast.xml</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>14400</integer>
+</dict>
+</plist>

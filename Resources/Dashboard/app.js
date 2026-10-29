@@ -39,6 +39,7 @@ function showPage(id){
   if(id==='discover')loadDiscovery(activePeriod);
   if(id==='activity')refresh();
   if(id==='setup')post({type:'loadSetup'});
+  if(id==='updates')post({type:'loadUpdatePreferences'});
 }
 document.querySelectorAll('.taskbar a').forEach(a=>a.addEventListener('click',()=>showPage(a.dataset.page)));
 const readerGuide=document.getElementById('readerSetupGuide');if(readerGuide)document.getElementById('setup').appendChild(readerGuide);
@@ -248,3 +249,8 @@ function initStudio(){titles.studio=['Studio','Capture text, transcribe audio, a
  document.addEventListener('click',e=>{const capture=e.target.closest('[data-studio-capture]');if(capture)studioPost('getCapture',{id:capture.dataset.studioCapture});const source=e.target.closest('[data-studio-source]');if(source){const item=annotationState.items.find(x=>x.id===source.dataset.studioSource)||studioState.history.flatMap(x=>x.citations).find(x=>x.id===source.dataset.studioSource);if(item)annotationPost('open',{item})}});
 }
 initStudio();
+
+// Sparkle owns these preferences; they are not duplicated in annotation storage.
+document.getElementById('updates').insertAdjacentHTML('afterbegin',`<article class="annotation-card" id="shelfUpdateSettings"><h3>Shelf app updates</h3><p id="shelfUpdateVersion">Loading updater settings…</p><label class="annotation-check"><input type="checkbox" id="shelfUpdateChecks">Check for updates automatically</label><label class="annotation-check"><input type="checkbox" id="shelfUpdateDownloads">Download and install updates automatically</label><p class="hint">Updates are checked about every four hours while Shelf is running. Sparkle verifies signed releases and handles installation and relaunch. Automatic installation may wait until you quit, and macOS can request authorization.</p><button class="btn primary" id="shelfCheckNow" onclick="post({type:'checkShelfUpdates'})">Check for Shelf updates…</button></article>`);
+window.updatePreferences=value=>{document.getElementById('shelfUpdateVersion').textContent=`Shelf ${value.version}${value.configured?'':' · Update-signing setup required for this build'}`;document.getElementById('shelfUpdateChecks').checked=!!value.checks;document.getElementById('shelfUpdateDownloads').checked=!!value.downloads;document.getElementById('shelfUpdateChecks').disabled=!value.configured;document.getElementById('shelfUpdateDownloads').disabled=!value.configured||!value.checks;document.getElementById('shelfCheckNow').disabled=!value.configured};
+for(const id of ['shelfUpdateChecks','shelfUpdateDownloads'])document.getElementById(id).addEventListener('change',()=>post({type:'saveUpdatePreferences',checks:document.getElementById('shelfUpdateChecks').checked,downloads:document.getElementById('shelfUpdateDownloads').checked}));

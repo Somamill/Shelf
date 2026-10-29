@@ -32,7 +32,55 @@ jobs:
           python3 -m py_compile Sources/ShelfCore/Tools/*.py
           python3 -m unittest discover -s Tests/Python -v
           node --check Resources/Dashboard/app.js
+      - name: Report release-signing setup readiness
+        env:
+          SPARKLE_KEY_CONFIGURED: ${{ secrets.SPARKLE_PRIVATE_KEY != '' }}
+        run: |
+          if [[ "$SPARKLE_KEY_CONFIGURED" == true ]]; then
+            echo 'Sparkle release signing key is configured.'
+          else
+            echo '::notice::Sparkle release signing key still needs one-time developer setup.'
+          fi
+      - name: Prepare signed-updater test fixture
+        run: |
+          bash Scripts/download-sparkle.sh "$RUNNER_TEMP/Sparkle"
+          umask 077
+          openssl rand -base64 32 > "$RUNNER_TEMP/sparkle-test.key"
+          swift Scripts/configure-updater.swift Config/Shelf-Info.plist < "$RUNNER_TEMP/sparkle-test.key" > "$RUNNER_TEMP/sparkle-test.pub"
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml --project .
       - name: Build macOS app
-        run: xcodebuild -project Shelf.xcodeproj -scheme Shelf -configuration Release -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project Shelf.xcodeproj -scheme Shelf -configuration Release -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/ShelfCI" CODE_SIGNING_ALLOWED=NO build
+      - name: Verify signed update archive and feed
+        run: |
+          APP="$RUNNER_TEMP/ShelfCI/Build/Products/Release/Shelf.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          mkdir -p "$RUNNER_TEMP/update-test"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/update-test/Shelf.zip"
+          "$RUNNER_TEMP/Sparkle/bin/sign_update" -p --ed-key-file "$RUNNER_TEMP/sparkle-test.key" "$RUNNER_TEMP/update-test/Shelf.zip" > "$RUNNER_TEMP/test-signature"
+          "$RUNNER_TEMP/Sparkle/bin/sign_update" --verify --ed-key-file "$RUNNER_TEMP/sparkle-test.key" "$RUNNER_TEMP/update-test/Shelf.zip" "$(cat "$RUNNER_TEMP/test-signature")"
+          "$RUNNER_TEMP/Sparkle/bin/generate_appcast" --ed-key-file "$RUNNER_TEMP/sparkle-test.key" --download-url-prefix https://example.invalid/updates/ "$RUNNER_TEMP/update-test"
+          "$RUNNER_TEMP/Sparkle/bin/sign_update" --verify --ed-key-file "$RUNNER_TEMP/sparkle-test.key" "$RUNNER_TEMP/update-test/appcast.xml"
+          cp "$RUNNER_TEMP/update-test/Shelf.zip" "$RUNNER_TEMP/tampered.zip"
+          printf 'tampered' >> "$RUNNER_TEMP/tampered.zip"
+          if "$RUNNER_TEMP/Sparkle/bin/sign_update" --verify --ed-key-file "$RUNNER_TEMP/sparkle-test.key" "$RUNNER_TEMP/tampered.zip" "$(cat "$RUNNER_TEMP/test-signature")"; then
+            echo 'Tampered archive was incorrectly accepted' >&2
+            exit 1
+          fi
+      - name: Smoke-test updater-enabled app startup
+        run: |
+          APP="$RUNNER_TEMP/ShelfCI/Build/Products/Release/Shelf.app"
+          "$APP/Contents/MacOS/Shelf" -SUEnableAutomaticChecks NO > "$RUNNER_TEMP/shelf-startup.log" 2>&1 &
+          APP_PID=$!
+          trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if grep -q 'dashboard page loaded' "$RUNNER_TEMP/shelf-startup.log"; then break; fi
+            if ! kill -0 "$APP_PID" 2>/dev/null; then cat "$RUNNER_TEMP/shelf-startup.log"; exit 1; fi
+            sleep 1
+          done
+          grep -q 'dashboard page loaded' "$RUNNER_TEMP/shelf-startup.log" || { cat "$RUNNER_TEMP/shelf-startup.log"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-xcode-project
+          path: Shelf.xcodeproj/project.pbxproj
