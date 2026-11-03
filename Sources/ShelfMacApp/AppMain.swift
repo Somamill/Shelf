@@ -370,7 +370,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         switch type {
         case "annotations": annotationRequest(body)
         case "studio": studioRequest(body)
-        case "showNavigationMenu": NSApp.mainMenu?.item(withTitle:"View")?.submenu?.popUp(positioning:nil,at:NSEvent.mouseLocation,in:nil)
+        case "showNavigationMenu": showMoreViews()
         case "loadSetup": loadSetup()
         case "autoSetup": autoSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
@@ -564,7 +564,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle:"Quit Shelf",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let view=NSMenuItem(); view.title="Dashboard"; menu.addItem(view)
-        let viewMenu=NSMenu(); view.submenu=viewMenu
+        let viewMenu=NSMenu(); view.submenu=viewMenu; navigationMenu=viewMenu
         let updateItem=NSMenuItem(title:"Check for updates",action:#selector(menuUpdate),keyEquivalent:"u"); updateItem.target=self; updateItem.keyEquivalentModifierMask=[.command,.shift]; viewMenu.addItem(updateItem)
         let edit=NSMenuItem(); edit.title="Edit"; menu.addItem(edit)
         let editMenu=NSMenu(title:"Edit"); edit.submenu=editMenu
@@ -580,6 +580,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         NSApp.mainMenu=menu
     }
 
+    private var navigationMenu:NSMenu?
+    private func showMoreViews() {
+        let popup=NSMenu(title:"More")
+        for item in navigationMenu?.items ?? [] { if let copy=item.copy() as? NSMenuItem { popup.addItem(copy) } }
+        popup.popUp(positioning:nil,at:NSEvent.mouseLocation,in:nil)
+    }
     @objc private func menuNavigate(_ sender:NSMenuItem) {
         if activeReader != nil { closeReader() }
         let pages=["books","discover","statistics","services","integrations","activity","setup","updates","highlights","review","preferences","studio"]
