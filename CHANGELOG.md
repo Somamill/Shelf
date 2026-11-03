@@ -198,6 +198,12 @@
 
 # Changelog
 
+## 0.2.3
+
+- Install a KOReader companion that accepts percentage progress from Shelf and Readwise while preserving EPUB text anchors.
+- Enable automatic binary matching, document metadata, and five-page progress updates during Android setup.
+
+
 ## 0.2.2
 
 - Remove the library health panel and simplify the library header.
