@@ -581,9 +581,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     @objc private func menuNavigate(_ sender:NSMenuItem) {
         if activeReader != nil { closeReader() }
-        let pages=["books","discover","statistics","services","integrations","activity","setup","updates","annotations","review","annotation-settings","studio"]
+        let pages=["books","discover","statistics","services","integrations","activity","setup","updates","highlights","review","preferences","studio"]
         guard pages.indices.contains(sender.tag) else { return }
-        webView.evaluateJavaScript("showPage('\(pages[sender.tag])')",completionHandler:nil)
+        webView.evaluateJavaScript("document.querySelector('.taskbar [data-page=\(pages[sender.tag])]')?.click()",completionHandler:nil)
     }
     @objc private func menuSearch() {
         if activeReader != nil { closeReader() }
