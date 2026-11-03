@@ -370,6 +370,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         switch type {
         case "annotations": annotationRequest(body)
         case "studio": studioRequest(body)
+        case "showNavigationMenu": NSApp.mainMenu?.item(withTitle:"View")?.submenu?.popUp(positioning:nil,at:NSEvent.mouseLocation,in:nil)
         case "loadSetup": loadSetup()
         case "autoSetup": autoSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
@@ -2406,6 +2407,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
         let merged=Self.run(self.pythonExecutable,[helper,source.path,output.path],input:input)
         guard merged.code == 0 else { try? fm.removeItem(at:root); throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
+        if let plugin=Bundle.main.resourceURL?.appendingPathComponent("KOReader/shelfprogress.koplugin"), fm.fileExists(atPath:plugin.path) {
+            let plugins=koreader.appendingPathComponent("plugins",isDirectory:true)
+            try fm.createDirectory(at:plugins,withIntermediateDirectories:true)
+            try fm.copyItem(at:plugin,to:plugins.appendingPathComponent("shelfprogress.koplugin"))
+        }
         // KOReader stores the active plugin files in settings/, but its older
         // monolithic reader configuration lives beside that directory.
         let legacyInSettings=output.appendingPathComponent("settings.reader.lua")

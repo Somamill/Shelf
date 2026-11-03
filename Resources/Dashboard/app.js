@@ -259,3 +259,5 @@ function renderReadwiseImport(){const root=document.getElementById('readwiseImpo
 // Native menu commands share the same navigation path as the taskbar.
 window.shelfFocusSearch=()=>{showPage('books');const field=document.getElementById('librarySearch');field?.focus();field?.select()};
 document.querySelectorAll('.taskbar a').forEach((item,index)=>{item.tabIndex=0;item.setAttribute('role','button');item.title=item.textContent.trim()+(index<10?` · ⌘${index===9?0:index+1}`:'');item.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();showPage(item.dataset.page)}})});
+
+const navigationMore=document.createElement('button');navigationMore.className='taskbar-more';navigationMore.type='button';navigationMore.setAttribute('aria-label','More views and keyboard shortcuts');navigationMore.textContent='•••';navigationMore.title='More views';navigationMore.addEventListener('click',()=>post({type:'showNavigationMenu'}));document.querySelector('.taskbar').appendChild(navigationMore);
