@@ -200,6 +200,8 @@
 
 ## 0.2.3
 
+- Accept numeric Readwise export cursors and empty final cursors so full highlight imports complete.
+
 - Show currently reading Hardcover titles in My books even before a provider reports a numeric percentage (including BookPlayer audiobook status).
 
 - Install a KOReader companion that accepts percentage progress from Shelf and Readwise while preserving EPUB text anchors.
