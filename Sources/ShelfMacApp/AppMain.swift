@@ -571,8 +571,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             editMenu.addItem(withTitle:title,action:NSSelectorFromString(selector),keyEquivalent:key)
         }
         view.title="View"
-        for (index,page) in ["Books","Discover","Statistics","Operations","Connections","Activity","Setup","Updates"].enumerated() {
-            let item=NSMenuItem(title:page,action:#selector(menuNavigate(_:)),keyEquivalent:String(index+1)); item.tag=index; item.target=self; viewMenu.addItem(item)
+        for (index,page) in ["Books","Discover","Statistics","Operations","Connections","Activity","Setup","Updates","Highlights","Review","Highlight Settings","Studio"].enumerated() {
+            let item=NSMenuItem(title:page,action:#selector(menuNavigate(_:)),keyEquivalent:index<10 ? String(index==9 ? 0 : index+1) : ""); item.tag=index; item.target=self; viewMenu.addItem(item)
         }
         let search=NSMenuItem(title:"Search Library",action:#selector(menuSearch),keyEquivalent:"f"); search.target=self; viewMenu.addItem(search)
         let back=NSMenuItem(title:"Back to Library",action:#selector(menuBack),keyEquivalent:"["); back.target=self; viewMenu.addItem(back)
@@ -581,7 +581,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     @objc private func menuNavigate(_ sender:NSMenuItem) {
         if activeReader != nil { closeReader() }
-        let pages=["books","discover","statistics","services","integrations","activity","setup","updates"]
+        let pages=["books","discover","statistics","services","integrations","activity","setup","updates","annotations","review","annotation-settings","studio"]
         guard pages.indices.contains(sender.tag) else { return }
         webView.evaluateJavaScript("showPage('\(pages[sender.tag])')",completionHandler:nil)
     }
