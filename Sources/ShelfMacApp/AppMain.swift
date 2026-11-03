@@ -279,6 +279,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         webView.navigationDelegate=self
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1240,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title = "Shelf"
+        window.styleMask.insert(.fullSizeContentView)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.toolbarStyle = .unifiedCompact
         // A nil appearance follows the user's macOS light/dark setting.
         // Allow practical Split View sizing so native edge snapping works on
         // MacBook screens without forcing the dashboard above half-screen width.
@@ -314,6 +318,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let self else { return }
             if self.window.isVisible && !self.window.isMiniaturized { self.refresh() }
             self.annotationMaintenance()
+            self.automaticReadwiseSync()
         }
     }
 
@@ -556,13 +561,43 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         else { shelfUpdate.target=self }
         appMenu.addItem(shelfUpdate)
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle:"Quit Dashboard",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+        appMenu.addItem(withTitle:"Quit Shelf",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let view=NSMenuItem(); view.title="Dashboard"; menu.addItem(view)
         let viewMenu=NSMenu(); view.submenu=viewMenu
         let updateItem=NSMenuItem(title:"Check for updates",action:#selector(menuUpdate),keyEquivalent:"u"); updateItem.target=self; updateItem.keyEquivalentModifierMask=[.command,.shift]; viewMenu.addItem(updateItem)
+        let edit=NSMenuItem(); edit.title="Edit"; menu.addItem(edit)
+        let editMenu=NSMenu(title:"Edit"); edit.submenu=editMenu
+        for (title,selector,key) in [("Undo","undo:","z"),("Cut","cut:","x"),("Copy","copy:","c"),("Paste","paste:","v"),("Select All","selectAll:","a")] {
+            editMenu.addItem(withTitle:title,action:NSSelectorFromString(selector),keyEquivalent:key)
+        }
+        view.title="View"
+        for (index,page) in ["Books","Discover","Statistics","Operations","Connections","Activity","Setup","Updates"].enumerated() {
+            let item=NSMenuItem(title:page,action:#selector(menuNavigate(_:)),keyEquivalent:String(index+1)); item.tag=index; item.target=self; viewMenu.addItem(item)
+        }
+        let search=NSMenuItem(title:"Search Library",action:#selector(menuSearch),keyEquivalent:"f"); search.target=self; viewMenu.addItem(search)
+        let back=NSMenuItem(title:"Back to Library",action:#selector(menuBack),keyEquivalent:"["); back.target=self; viewMenu.addItem(back)
         NSApp.mainMenu=menu
     }
 
+    @objc private func menuNavigate(_ sender:NSMenuItem) {
+        if activeReader != nil { closeReader() }
+        let pages=["books","discover","statistics","services","integrations","activity","setup","updates"]
+        guard pages.indices.contains(sender.tag) else { return }
+        webView.evaluateJavaScript("showPage('\(pages[sender.tag])')",completionHandler:nil)
+    }
+    @objc private func menuSearch() {
+        if activeReader != nil { closeReader() }
+        webView.evaluateJavaScript("window.shelfFocusSearch()",completionHandler:nil)
+    }
+    @objc private func menuBack() { if activeReader != nil { closeReader() } else { webView.evaluateJavaScript("showPage('books')",completionHandler:nil) } }
+    private var lastAutomaticReadwiseSync=Date.distantPast
+    private var readwiseSyncInProgress=false
+    private func automaticReadwiseSync() {
+        guard Date().timeIntervalSince(lastAutomaticReadwiseSync)>300,
+              !(localCredential("readwise-reader-token") ?? "").isEmpty,
+              !readwiseSyncInProgress else { return }
+        lastAutomaticReadwiseSync=Date(); syncReadwiseReader()
+    }
     @objc private func menuUpdate() { checkUpdates() }
 
     private func refresh() {
@@ -1315,6 +1350,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
 
     private func syncReadwiseReader() {
+        guard !readwiseSyncInProgress else { return }
         let token:String
         if let saved=localCredential("readwise-reader-token"),!saved.isEmpty { token=saved }
         else {
@@ -1341,10 +1377,12 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             "importHighlights":annotationSettings["importReadwise"] as? Bool ?? true,
             "importProgress":annotationSettings["importProgress"] as? Bool ?? true]
         guard let data=try? JSONSerialization.data(withJSONObject:input),let json=String(data:data,encoding:.utf8) else { notify("Could not prepare the Readwise sync."); return }
+        readwiseSyncInProgress=true
         notify("Syncing Readwise Reader with matching Calibre books…")
         DispatchQueue.global(qos:.utility).async { [weak self] in
             guard let self else { return }
             let result=Self.run(self.pythonExecutable,[script],input:json)
+            defer { DispatchQueue.main.async { self.readwiseSyncInProgress=false } }
             guard let outputData=result.output.data(using:.utf8),
                   let response=try? JSONSerialization.jsonObject(with:outputData) as? [String:Any],
                   response["ok"] as? Bool == true else {

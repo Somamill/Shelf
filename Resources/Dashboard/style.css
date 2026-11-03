@@ -388,3 +388,10 @@ html .annotation-card[data-color="yellow"]{border-inline-start-color:#d0b855}htm
 #studioNotionPreview{margin-top:20px}#studioNotionPreview p{white-space:pre-wrap}
 #studio button:disabled{opacity:.5;cursor:wait}#studio summary{cursor:pointer;padding:12px 0}
 @media(max-width:900px){.studio-grid{grid-template-columns:1fr}}
+/* A single compact app header; operational details live in Operations. */
+header{min-height:64px!important;padding:18px 0!important;align-items:center!important;margin-bottom:16px!important}
+header .host-status,header .eyebrow,header #pageSub,header .updated,footer{display:none!important}
+header h1{font-size:26px!important;letter-spacing:-.7px;margin:0!important}
+main{padding-top:40px!important}
+.taskbar a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #558fff;outline-offset:4px}
+.fulltext-panel{display:none!important}

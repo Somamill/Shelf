@@ -198,6 +198,13 @@
 
 # Changelog
 
+## 0.2.2
+
+- Remove the library health panel and simplify the library header.
+- Add native Edit and View menus, numbered navigation shortcuts and library search.
+- Integrate the window title bar and automatically sync saved Readwise connections every five minutes while Shelf is open.
+
+
 ## 0.1.13
 
 - Treat a zero-error EPUB audit summary as healthy instead of matching the word “errors” as a failure.
