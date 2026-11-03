@@ -223,7 +223,7 @@ def main() -> int:
     sync_settings = sync.get("settings", {})
     if not isinstance(sync_settings, dict):
         raise ValueError("KOReader Sync settings have an unsupported shape")
-    sync_settings.update({"custom_server": sync_url, "username": username, "userkey": userkey})
+    sync_settings.update({"custom_server": sync_url, "username": username, "userkey": userkey, "auto_sync": True, "send_metadata": True, "checksum_method": 0, "pages_before_update": 5, "sync_forward": 2, "sync_backward": 2})
     sync["settings"] = sync_settings
     write_settings(output / "kosync.lua", sync)
 
@@ -233,8 +233,10 @@ def main() -> int:
     legacy = reader.get("kosync", {})
     if not isinstance(legacy, dict):
         raise ValueError("legacy KOReader Sync settings have an unsupported shape")
-    legacy.update({"custom_server": sync_url, "username": username, "userkey": userkey})
+    legacy.update(dict(sync_settings))
     reader["kosync"] = legacy
+    if values.get("readwise_token"):
+        reader.setdefault("exporter", {}).setdefault("readwise", {}).update({"token": values["readwise_token"], "enabled": True})
     # Older KOReader builds kept these values at the top level. Update the
     # server identity there too so a downgrade or migration cannot revive an
     # obsolete port from the old settings.reader.lua file.

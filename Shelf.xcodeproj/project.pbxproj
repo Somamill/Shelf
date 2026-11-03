@@ -12,6 +12,7 @@
 		169E70579C1BB94E8C32806F /* reader_book.py in Resources */ = {isa = PBXBuildFile; fileRef = 7BFADF4D5203B98BD10D1181 /* reader_book.py */; };
 		1A9CAB3A150EEE451B9573A9 /* readwise_reader_sync.py in Resources */ = {isa = PBXBuildFile; fileRef = 71413F49BD77FBE2E13F3787 /* readwise_reader_sync.py */; };
 		20289FFE617A574C82A2556E /* open_library_book.py in Resources */ = {isa = PBXBuildFile; fileRef = 8EF8B349102C7D642FBD64F7 /* open_library_book.py */; };
+		2067DBFD5830B1256C585E68 /* KOReader in Resources */ = {isa = PBXBuildFile; fileRef = B227FD6D3DDD200ADA35F017 /* KOReader */; };
 		2CEECEF5579850629BE85585 /* apple_books.py in Resources */ = {isa = PBXBuildFile; fileRef = E9D67CA3233AF59FB22C2DD3 /* apple_books.py */; };
 		49A0629B6694AFE1DEDAD4C6 /* style.css in Resources */ = {isa = PBXBuildFile; fileRef = C1D4B60D9296B03E4CA18373 /* style.css */; };
 		4B615E82AC373201608C95C9 /* boox_rotation.py in Resources */ = {isa = PBXBuildFile; fileRef = 650147434549546734006E3B /* boox_rotation.py */; };
@@ -32,13 +33,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		12B67EC8E0475301B4424C41 /* CalibreStackDashboard */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CalibreStackDashboard; path = .; sourceTree = SOURCE_ROOT; };
 		15975E75F118DA6A5F9DDC22 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		20096C905A07887BF87BAB46 /* calibre_fts.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = calibre_fts.py; sourceTree = "<group>"; };
 		2F85114DFBCFAEB5D0E157C9 /* shelf_book_actions.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_book_actions.py; sourceTree = "<group>"; };
 		32B8DD740E9D64ABA17E06E1 /* PythonRuntime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PythonRuntime; path = Resources/PythonRuntime; sourceTree = SOURCE_ROOT; };
 		33E2AEAFC476556B6591566B /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
 		43AAC851C380CD7E8C14C017 /* shelf_annotations.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = shelf_annotations.py; sourceTree = "<group>"; };
-		48F70B1D8D51C66592CB1BB8 /* Shelf */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Shelf; path = .; sourceTree = SOURCE_ROOT; };
 		5E4687CC9A77B219982C2592 /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		650147434549546734006E3B /* boox_rotation.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_rotation.py; sourceTree = "<group>"; };
 		651C15DF7B8D47C401DD2135 /* config.example.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = config.example.json; sourceTree = "<group>"; };
@@ -49,6 +50,7 @@
 		8B32A8A7EF187897DF2E7B13 /* boox_settings.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = boox_settings.py; sourceTree = "<group>"; };
 		8EF8B349102C7D642FBD64F7 /* open_library_book.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = open_library_book.py; sourceTree = "<group>"; };
 		9096715045380B07144496A7 /* app.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = app.js; sourceTree = "<group>"; };
+		B227FD6D3DDD200ADA35F017 /* KOReader */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KOReader; path = Resources/KOReader; sourceTree = SOURCE_ROOT; };
 		B3AF4E815C2B4AF0A1B40186 /* kosync_calibre_bridge.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = kosync_calibre_bridge.py; sourceTree = "<group>"; };
 		C1D4B60D9296B03E4CA18373 /* style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = style.css; sourceTree = "<group>"; };
 		C434CA69BBA8550DF6E411AC /* Shelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -128,6 +130,7 @@
 			children = (
 				5C2AE7411A96E0DDA861916C /* Dashboard */,
 				1A10CE5BD9604E26DA10208A /* Icons */,
+				B227FD6D3DDD200ADA35F017 /* KOReader */,
 				32B8DD740E9D64ABA17E06E1 /* PythonRuntime */,
 			);
 			path = Resources;
@@ -136,7 +139,7 @@
 		AC1DA195D6463FE432930E9E /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				48F70B1D8D51C66592CB1BB8 /* Shelf */,
+				12B67EC8E0475301B4424C41 /* CalibreStackDashboard */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -242,6 +245,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */,
+				2067DBFD5830B1256C585E68 /* KOReader in Resources */,
 				DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */,
 				CA04118D7DFF0280FFF26873 /* app.js in Resources */,
 				2CEECEF5579850629BE85585 /* apple_books.py in Resources */,
@@ -426,7 +430,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 47;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -440,7 +444,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
@@ -454,7 +458,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 47;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -468,7 +472,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;

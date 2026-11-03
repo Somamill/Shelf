@@ -370,6 +370,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         switch type {
         case "annotations": annotationRequest(body)
         case "studio": studioRequest(body)
+        case "showNavigationMenu": showMoreViews()
         case "loadSetup": loadSetup()
         case "autoSetup": autoSetup()
         case "saveSetup": if let config=body["config"] as? [String:Any] { saveSetup(config) }
@@ -563,7 +564,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle:"Quit Shelf",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let view=NSMenuItem(); view.title="Dashboard"; menu.addItem(view)
-        let viewMenu=NSMenu(); view.submenu=viewMenu
+        let viewMenu=NSMenu(); view.submenu=viewMenu; navigationMenu=viewMenu
         let updateItem=NSMenuItem(title:"Check for updates",action:#selector(menuUpdate),keyEquivalent:"u"); updateItem.target=self; updateItem.keyEquivalentModifierMask=[.command,.shift]; viewMenu.addItem(updateItem)
         let edit=NSMenuItem(); edit.title="Edit"; menu.addItem(edit)
         let editMenu=NSMenu(title:"Edit"); edit.submenu=editMenu
@@ -571,19 +572,25 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             editMenu.addItem(withTitle:title,action:NSSelectorFromString(selector),keyEquivalent:key)
         }
         view.title="View"
-        for (index,page) in ["Books","Discover","Statistics","Operations","Connections","Activity","Setup","Updates"].enumerated() {
-            let item=NSMenuItem(title:page,action:#selector(menuNavigate(_:)),keyEquivalent:String(index+1)); item.tag=index; item.target=self; viewMenu.addItem(item)
+        for (index,page) in ["Books","Discover","Statistics","Operations","Connections","Activity","Setup","Updates","Highlights","Review","Highlight Settings","Studio"].enumerated() {
+            let item=NSMenuItem(title:page,action:#selector(menuNavigate(_:)),keyEquivalent:index<10 ? String(index==9 ? 0 : index+1) : ""); item.tag=index; item.target=self; viewMenu.addItem(item)
         }
         let search=NSMenuItem(title:"Search Library",action:#selector(menuSearch),keyEquivalent:"f"); search.target=self; viewMenu.addItem(search)
         let back=NSMenuItem(title:"Back to Library",action:#selector(menuBack),keyEquivalent:"["); back.target=self; viewMenu.addItem(back)
         NSApp.mainMenu=menu
     }
 
+    private var navigationMenu:NSMenu?
+    private func showMoreViews() {
+        let popup=NSMenu(title:"More")
+        for item in navigationMenu?.items ?? [] { if let copy=item.copy() as? NSMenuItem { popup.addItem(copy) } }
+        popup.popUp(positioning:nil,at:NSEvent.mouseLocation,in:nil)
+    }
     @objc private func menuNavigate(_ sender:NSMenuItem) {
         if activeReader != nil { closeReader() }
-        let pages=["books","discover","statistics","services","integrations","activity","setup","updates"]
+        let pages=["books","discover","statistics","services","integrations","activity","setup","updates","highlights","review","preferences","studio"]
         guard pages.indices.contains(sender.tag) else { return }
-        webView.evaluateJavaScript("showPage('\(pages[sender.tag])')",completionHandler:nil)
+        webView.evaluateJavaScript("document.querySelector('.taskbar [data-page=\(pages[sender.tag])]')?.click()",completionHandler:nil)
     }
     @objc private func menuSearch() {
         if activeReader != nil { closeReader() }
@@ -2342,7 +2349,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                     }
                     let alert=NSAlert()
                     alert.messageText="No BOOX tablet connected"
-                    alert.informativeText="Connect the tablet by USB, enable USB debugging, and accept the authorization prompt. You can also save a settings package to copy onto the tablet manually. The package contains your Calibre server password."
+                    alert.informativeText="Connect the tablet by USB, enable USB debugging, and accept the authorization prompt. You can also save a settings package to copy onto the tablet manually. The package contains your Calibre password and, when connected, your Readwise token."
                     alert.addButton(withTitle:"Save setup package…")
                     alert.addButton(withTitle:"Cancel")
                     if alert.runModal() == .alertFirstButtonReturn { self.exportBooxSettings() }
@@ -2406,6 +2413,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let helper=Bundle.main.resourceURL?.appendingPathComponent("boox_settings.py").path ?? "\(home)/Shelf/boox_settings.py"
         let merged=Self.run(self.pythonExecutable,[helper,source.path,output.path],input:input)
         guard merged.code == 0 else { try? fm.removeItem(at:root); throw NSError(domain:"BooxSettings",code:Int(merged.code),userInfo:[NSLocalizedDescriptionKey:merged.output]) }
+        if let plugin=Bundle.main.resourceURL?.appendingPathComponent("KOReader/shelfprogress.koplugin"), fm.fileExists(atPath:plugin.path) {
+            let plugins=koreader.appendingPathComponent("plugins",isDirectory:true)
+            try fm.createDirectory(at:plugins,withIntermediateDirectories:true)
+            try fm.copyItem(at:plugin,to:plugins.appendingPathComponent("shelfprogress.koplugin"))
+        }
         // KOReader stores the active plugin files in settings/, but its older
         // monolithic reader configuration lives beside that directory.
         let legacyInSettings=output.appendingPathComponent("settings.reader.lua")
@@ -2415,7 +2427,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let readme="""
         KOReader Calibre setup
 
-        Copy the included files to the matching locations under the tablet's koreader folder while KOReader is closed: settings/opds.lua and settings/kosync.lua go in koreader/settings; settings.reader.lua goes directly in koreader. Keep a copy of the existing settings first. This package contains the Calibre server password. Delete it securely after setup.
+        Copy the included files to the matching locations under the tablet's koreader folder while KOReader is closed: settings/opds.lua and settings/kosync.lua go in koreader/settings; settings.reader.lua goes directly in koreader. Keep a copy of the existing settings first. This package contains the Calibre password and, when connected, the Readwise token. Delete it securely after setup.
 
         For automatic rotation, enable Android Auto-rotate and, while KOReader is active, open BOOX E-Ink Center > Optimize > Others > Force to follow system orientation.
 
@@ -2435,7 +2447,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let raw=Self.run("/sbin/ifconfig",["en0"]).output
         let ip=Self.capture(#"inet (\d+\.\d+\.\d+\.\d+)"#,raw) ?? ""
         guard !ip.isEmpty, !ip.hasPrefix("127.") else { throw NSError(domain:"BooxSettings",code:4,userInfo:[NSLocalizedDescriptionKey:"Could not determine this Mac’s Wi-Fi address."]) }
-        return ["lan_ip":ip,"opds_url":service("readerOpds",fallback:"http://\(ip):8080/opds"),"sync_url":service("readerSync",fallback:"http://\(ip):17200"),"username":username,"calibre_password":password,"kosync_userkey":key]
+        return ["lan_ip":ip,"opds_url":service("readerOpds",fallback:"http://\(ip):8080/opds"),"sync_url":service("readerSync",fallback:"http://\(ip):17200"),"username":username,"calibre_password":password,"kosync_userkey":key,"readwise_token":localCredential("readwise-reader-token") ?? ""]
     }
 
     private func transferBooxSettings(serial:String) throws -> String {
@@ -2509,6 +2521,15 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 restoreBooxSettings(adb:adb,serial:serial,settingsPath:settingsPath,legacyReaderPath:legacyReaderPath,backup:backup,existed:existed)
                 throw NSError(domain:"BooxSettings",code:12,userInfo:[NSLocalizedDescriptionKey:"The tablet did not verify \(name) after transfer; previous settings were restored where possible."])
             }
+        }
+        if let plugin=Bundle.main.resourceURL?.appendingPathComponent("KOReader/shelfprogress.koplugin"), FileManager.default.fileExists(atPath:plugin.path) {
+            let destination="\(koreaderRoot)/plugins/shelfprogress.koplugin"
+            _=Self.run(adb,["-s",serial,"shell","mkdir","-p","\(koreaderRoot)/plugins"])
+            if Self.run(adb,["-s",serial,"shell","test","-d",destination]).code == 0 {
+                _=Self.run(adb,["-s",serial,"shell","cp","-r",destination,"\(backup)/shelfprogress.koplugin"])
+            }
+            let pushed=Self.run(adb,["-s",serial,"push",plugin.path,"\(koreaderRoot)/plugins/"])
+            guard pushed.code == 0 else { throw NSError(domain:"BooxSettings",code:15,userInfo:[NSLocalizedDescriptionKey:"Could not install percentage progress support: \(pushed.output)"]) }
         }
         let rotationHelper=Bundle.main.resourceURL?.appendingPathComponent("boox_rotation.py").path ?? "\(home)/Shelf/boox_rotation.py"
         let rotation=Self.run(self.pythonExecutable,[rotationHelper,adb,serial])

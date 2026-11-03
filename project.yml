@@ -20,6 +20,9 @@ targets:
       # XcodeGen currently drops target-level resources when a source path is
       # a nested directory. Keep resources explicit in sources with their
       # build phase so the generated app always contains the dashboard/tools.
+      - path: Resources/KOReader
+        type: folder
+        buildPhase: resources
       - path: Resources/Dashboard/index.html
         buildPhase: resources
       - path: Resources/Dashboard/style.css
@@ -84,8 +87,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.2.2
-        CURRENT_PROJECT_VERSION: 46
+        MARKETING_VERSION: 0.2.3
+        CURRENT_PROJECT_VERSION: 47
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES

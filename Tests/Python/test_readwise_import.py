@@ -47,6 +47,15 @@ class ReadwiseImportTests(unittest.TestCase):
         self.assertEqual(rows[0]['location']['document'],'https://readwise.io/open/100')
         self.assertEqual(self.lib.queue(),[])
 
+    def test_numeric_cursor_roundtrips_and_empty_cursor_finishes(self):
+        result,_=self.pull(response([book(1)],12345))
+        self.assertTrue(result['readwiseMore'])
+        self.time.return_value+=5
+        result,fetch=self.pull(response([book(2)],''),automatic=True)
+        self.assertIn('pageCursor=12345',fetch.call_args.args[0].full_url)
+        self.assertFalse(result['readwiseMore'])
+        self.assertEqual(self.lib.readwise_status()['processed'],2)
+
     def test_pages_resume_after_restart_and_checkpoint_only_on_completion(self):
         result,_=self.pull(response([book(1)],'opaque-cursor'))
         self.assertTrue(result['readwiseMore'])

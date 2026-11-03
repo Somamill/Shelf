@@ -395,3 +395,8 @@ header h1{font-size:26px!important;letter-spacing:-.7px;margin:0!important}
 main{padding-top:40px!important}
 .taskbar a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #558fff;outline-offset:4px}
 .fulltext-panel{display:none!important}
+
+.taskbar a[data-page="services"],.taskbar a[data-page="activity"],.taskbar a[data-page="setup"],.taskbar a[data-page="updates"],.taskbar a[data-page="review"],.taskbar a[data-page="preferences"],.taskbar a[data-page="studio"]{display:none}
+.taskbar-more{align-self:stretch;min-width:56px;border:0;background:transparent;color:var(--ink);font:600 22px system-ui;cursor:pointer;border-radius:16px}.taskbar-more:hover{background:var(--glass-raised)}
+
+#books>.books-hero{display:none!important}#books>.section-head h3,#books #shelfSummary{display:none}#books .section-head{margin-top:8px!important}

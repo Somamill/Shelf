@@ -265,6 +265,9 @@ class Library:
                 page=json.loads(content)
             if not isinstance(page,dict) or not isinstance(page.get('results'),list): raise ValueError('Invalid response')
             cursor=page.get('nextPageCursor')
+            if cursor == '': cursor=None
+            if isinstance(cursor, int) and not isinstance(cursor, bool) and cursor >= 0:
+                cursor=str(cursor)
             if cursor is not None and (not isinstance(cursor,str) or not cursor or cursor==state.get('cursor')):
                 raise ValueError('Invalid export cursor')
             # No changes to highlights or cursor survive a malformed/failed page.
