@@ -1,3 +1,21 @@
+## 0.2.4
+
+- Keep the production updater public key in regular app builds and enable automatic update checks by default, respecting saved preferences.
+- Publish new versioned releases automatically after the main branch passes CI; verify signatures and notarization before publication.
+- Add a private developer setup assistant for Apple Developer ID signing and GitHub notarization credentials.
+- Update the existing KOReader Calibre catalog after network changes instead of adding duplicate entries.
+
+## 0.2.3
+
+- Correct BOOX progress navigation when another reader sends a percentage instead of an EPUB location.
+- Include currently-reading Hardcover audiobooks without a numeric progress value in the library.
+- Import all Readwise highlight pages, including numeric pagination cursors.
+
+## 0.2.2
+
+- Simplify the library and navigation with native macOS menus and keyboard shortcuts.
+- Automatically synchronize Readwise progress while Shelf is running.
+
 ## 0.2.1
 
 - Add Sparkle in-app updates with user-controlled automatic checks and installation preferences.

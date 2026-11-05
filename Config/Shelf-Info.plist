@@ -13,17 +13,21 @@
 			</array>
 		</dict>
 	</array>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/Somamill/Shelf/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>xVwdog3C2KZCS1a1JA+M2S1xZWeGABEZ78NSHDsiLac=</string>
 	<key>SURequireSignedFeed</key>
-	<true/>
-	<key>SUAutomaticallyUpdate</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>14400</integer>
-	<key>SUVerifyUpdateBeforeExtraction</key>
-	<true/>
 	<key>SUSignedFeedFailureExpirationInterval</key>
 	<integer>0</integer>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>
