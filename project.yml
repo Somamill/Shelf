@@ -25,6 +25,8 @@ targets:
         buildPhase: resources
       - path: Resources/Dashboard/index.html
         buildPhase: resources
+      - path: Resources/Dashboard/AppIcon.png
+        buildPhase: resources
       - path: Resources/Dashboard/style.css
         buildPhase: resources
       - path: Resources/Dashboard/app.js
@@ -87,8 +89,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.2.4
-        CURRENT_PROJECT_VERSION: 48
+        MARKETING_VERSION: 0.2.5
+        CURRENT_PROJECT_VERSION: 49
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
