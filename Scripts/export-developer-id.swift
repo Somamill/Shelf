@@ -31,7 +31,7 @@ let password = String(decoding:FileHandle.standardInput.readDataToEndOfFile(),as
 guard !password.isEmpty else { fail("Missing temporary export password.") }
 var params = SecItemImportExportKeyParameters()
 params.version = UInt32(SEC_KEY_IMPORT_EXPORT_PARAMS_VERSION)
-let exportPassphrase = Unmanaged.passRetained(password as CFString)
+let exportPassphrase = Unmanaged<CFTypeRef>.passRetained(password as CFString)
 defer { exportPassphrase.release() }
 params.passphrase = exportPassphrase
 var exported: CFData?

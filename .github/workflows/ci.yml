@@ -32,6 +32,8 @@ jobs:
           python3 -m py_compile Sources/ShelfCore/Tools/*.py
           python3 -m unittest discover -s Tests/Python -v
           node --check Resources/Dashboard/app.js
+          python3 -m py_compile Scripts/setup-apple-signing.py
+          swift Scripts/export-developer-id.swift
       - name: Report release-signing setup readiness
         env:
           SPARKLE_KEY_CONFIGURED: ${{ secrets.SPARKLE_PRIVATE_KEY != '' }}

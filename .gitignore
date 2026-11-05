@@ -20,6 +20,9 @@ config.json
 *.secret
 *.pem
 *.key
+*.p12
+*.pfx
+*.p8
 
 # Logs, libraries, backups, and reader state
 *.log
