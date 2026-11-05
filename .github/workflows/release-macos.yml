@@ -1,6 +1,10 @@
 name: macOS release
 
 on:
+  workflow_run:
+    workflows: ['Build and validate']
+    types: [completed]
+    branches: [main]
   push:
     tags: ['v*']
   workflow_dispatch:
@@ -18,14 +22,52 @@ permissions:
   contents: write
 
 jobs:
-  macos-release:
-    runs-on: macos-15
-    env:
-      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+  release-plan:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || inputs.release_tag || github.ref }}
+      - name: Resolve validated release version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,re,subprocess
+          version=re.search(r'MARKETING_VERSION: (\d+\.\d+\.\d+)',pathlib.Path('project.yml').read_text()).group(1)
+          tag='v'+version
+          automatic=os.environ['GITHUB_EVENT_NAME']=='workflow_run'
+          if not automatic and os.environ['REQUESTED_TAG']!=tag:
+              raise SystemExit('Requested tag does not match project.yml')
+          latest=subprocess.run(['gh','release','view','--json','tagName'],capture_output=True,text=True,check=True)
+          previous=json.loads(latest.stdout)['tagName']
+          def parts(value):
+              if not re.fullmatch(r'v\d+\.\d+\.\d+',value):raise SystemExit('Expected stable semantic version')
+              return tuple(map(int,value[1:].split('.')))
+          publish=not automatic or parts(tag)>parts(previous)
+          commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write(f'publish={str(publish).lower()}\ntag={tag}\ncommit={commit}\n')
+          print(f'{tag}: '+('ready for release' if publish else 'already published; nothing to release'))
+          PY
+  macos-release:
+    needs: release-plan
+    if: needs.release-plan.outputs.publish == 'true'
+    runs-on: macos-15
+    env:
+      RELEASE_TAG: ${{ needs.release-plan.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.release-plan.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-plan.outputs.commit }}
           fetch-depth: 0
       - name: Prepare verified updater signing
         env:
@@ -87,12 +129,17 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          REQUIRE_APPLE_SIGNING: ${{ vars.REQUIRE_APPLE_SIGNING }}
         run: |
           missing=()
           for name in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
             if [ -z "${!name}" ]; then missing+=("$name"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
+            if [[ "$REQUIRE_APPLE_SIGNING" == true || "${#missing[@]}" -lt 5 ]]; then
+              echo "::error::Apple signing configuration is incomplete. Missing: ${missing[*]}. Refusing an unsigned fallback."
+              exit 1
+            fi
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Using unsigned community build::Configure Apple signing secrets to publish a signed and notarized app. Missing: ${missing[*]}"
           else
@@ -210,6 +257,19 @@ jobs:
           Verify the download with the SHA-256 checksum in \`Shelf.dmg.sha256\`.
           EOF
           fi
+          # workflow_run publishes only the commit whose main-branch CI passed.
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release-ref.json" 2>/dev/null; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$RELEASE_COMMIT" > "$RUNNER_TEMP/release-ref.json"
+          fi
+          python3 - <<'PYREF'
+          import json,os,pathlib,subprocess
+          ref=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'release-ref.json').read_text())
+          obj=ref['object']
+          while obj['type']=='tag':
+              obj=json.loads(subprocess.check_output(['gh','api',f"repos/{os.environ['GITHUB_REPOSITORY']}/git/tags/{obj['sha']}"],text=True))['object']
+          if obj['type']!='commit' or obj['sha']!=os.environ['RELEASE_COMMIT']:
+              raise SystemExit('Release tag points to a different commit; refusing publication')
+          PYREF
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$RELEASE_TAG" --draft --repo "$GITHUB_REPOSITORY" --title "Shelf ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true || { echo "Refusing to overwrite a published update" >&2; exit 1; }
@@ -221,4 +281,8 @@ jobs:
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
       - name: Remove temporary update signing seed
         if: always()
-        run: rm -f "$RUNNER_TEMP/sparkle.key"
+        run: |
+          rm -f "$RUNNER_TEMP/sparkle.key" "$RUNNER_TEMP/developer-id.p12"
+          if [[ -f "$RUNNER_TEMP/shelf-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/shelf-signing.keychain-db"
+          fi

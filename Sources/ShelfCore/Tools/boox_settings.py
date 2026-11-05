@@ -207,12 +207,20 @@ def main() -> int:
         servers = {index + 1: server for index, server in enumerate(servers)}
     if not isinstance(servers, dict):
         raise ValueError("KOReader OPDS server list has an unsupported shape")
-    server = next((item for item in servers.values() if isinstance(item, dict) and item.get("url") == opds_url), None)
+    # A network change must update the existing Calibre catalog, not add another.
+    calibre_keys = [key for key, item in servers.items() if isinstance(item, dict)
+                    and (item.get("url") == opds_url or "calibre" in str(item.get("title", "")).casefold())]
+    server = servers[calibre_keys[0]] if calibre_keys else None
+    for key in calibre_keys[1:]:
+        del servers[key]
     if server is None:
         numeric = [key for key in servers if isinstance(key, int)]
         server = {}
         servers[max(numeric, default=0) + 1] = server
     server.update({"title": "Calibre Library", "url": opds_url, "username": username, "password": password})
+    # KOReader iterates these arrays with ipairs; gaps would hide later catalogs.
+    if all(isinstance(key, int) for key in servers):
+        servers = {index: servers[key] for index, key in enumerate(sorted(servers), 1)}
     opds["servers"] = servers
     opds.setdefault("settings", {})
     opds.setdefault("downloads", {})
@@ -248,18 +256,18 @@ def main() -> int:
         legacy_servers = {index + 1: item for index, item in enumerate(legacy_servers)}
     if not isinstance(legacy_servers, dict):
         raise ValueError("legacy KOReader OPDS server list has an unsupported shape")
-    legacy_server = next(
-        (
-            item for item in legacy_servers.values()
-            if isinstance(item, dict) and (item.get("url") == opds_url or item.get("title") == "Calibre Library")
-        ),
-        None,
-    )
+    legacy_keys = [key for key, item in legacy_servers.items() if isinstance(item, dict)
+                   and (item.get("url") == opds_url or "calibre" in str(item.get("title", "")).casefold())]
+    legacy_server = legacy_servers[legacy_keys[0]] if legacy_keys else None
+    for key in legacy_keys[1:]:
+        del legacy_servers[key]
     if legacy_server is None:
         numeric = [key for key in legacy_servers if isinstance(key, int)]
         legacy_server = {}
         legacy_servers[max(numeric, default=0) + 1] = legacy_server
     legacy_server.update({"title": "Calibre Library", "url": opds_url, "username": username, "password": password})
+    if all(isinstance(key, int) for key in legacy_servers):
+        legacy_servers = {index: legacy_servers[key] for index, key in enumerate(sorted(legacy_servers), 1)}
     reader["opds_servers"] = legacy_servers
     write_settings(output / "settings.reader.lua", reader)
     return 0
