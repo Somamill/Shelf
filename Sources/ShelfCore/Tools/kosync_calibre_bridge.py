@@ -39,9 +39,43 @@ CROSSPOINT_DB = os.path.expanduser(configured_value("paths", "crosspointDatabase
 
 os.makedirs(LOGS, exist_ok=True)
 
+def activity_event(line):
+    match = re.search(r"SYNCED\s+book=(\d+).*?percentage=([0-9.]+).*?device=([^\r\n]+)",line)
+    stamp = re.match(r"\[([^]]+)\]",line)
+    if not match or not stamp:
+        return None
+    try:
+        date = datetime.fromisoformat(stamp[1]).astimezone().isoformat()
+        return {"bookId":int(match[1]),"progress":float(match[2]),"device":match[3].strip(),"date":date}
+    except (ValueError, OverflowError):
+        return None
+
+
+def update_activity_history():
+    history = os.path.join(LOGS,"reading-activity.jsonl")
+    if os.path.exists(history):
+        return
+    try:
+        with open(LOGFILE,encoding="utf-8",errors="replace") as source:
+            events = [event for line in source if (event := activity_event(line)) is not None][-3000:]
+        with open(history,"w",encoding="utf-8") as output:
+            for event in events:
+                output.write(json.dumps(event,ensure_ascii=False)+"\n")
+    except FileNotFoundError:
+        with open(history,"w",encoding="utf-8"):
+            pass
+    os.chmod(history,0o600)
+
+
 def log(msg):
     with open(LOGFILE, "a", encoding="utf-8") as f:
-        f.write(f"[{datetime.now().isoformat(sep=' ', timespec='seconds')}] {msg}\n")
+        line=f"[{datetime.now().isoformat(sep=' ', timespec='seconds')}] {msg}"
+        f.write(line+"\n")
+    event=activity_event(line)
+    if event is not None:
+        update_activity_history()
+        with open(os.path.join(LOGS,"reading-activity.jsonl"),"a",encoding="utf-8") as output:
+            output.write(json.dumps(event,ensure_ascii=False)+"\n")
 
 def cmd(args, check=True):
     return subprocess.run(
@@ -377,6 +411,7 @@ def main():
 
     try:
 
+        update_activity_history()
         log("BRIDGE START")
 
         book_result = cmd([
@@ -778,6 +813,13 @@ def main():
         # A timed-out write has an unknown outcome; reconcile on the next pass.
         log(f"ERROR bridge command timed out after {COMMAND_TIMEOUT} seconds; "
             "check Calibre and Docker availability before the next sync pass")
+        raise SystemExit(1) from None
+
+    except subprocess.CalledProcessError as error:
+        # Expected service outages must not dump command arguments or tracebacks.
+        is_docker = bool(error.cmd) and str(error.cmd[0]) == DOCKER
+        log("WARNING Sync servers are unavailable; automatic recovery will retry." if is_docker
+            else "ERROR Calibre could not save progress; the next sync pass will retry.")
         raise SystemExit(1) from None
 
     except Exception as e:

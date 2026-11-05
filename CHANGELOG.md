@@ -1,3 +1,14 @@
+## 0.2.5
+
+- Restore local sync service startup with Colima and add low-frequency recovery for unavailable containers.
+- Save reader progress locally before publishing, retry after outages, and preserve newer positions from other devices.
+- Support keyboard page turns after using reader controls; fix OLED appearance and responsive page columns.
+- Simplify and align the floating reader toolbar with consistent icon buttons.
+- Refresh statistics on entry, tolerate malformed activity dates, and count identified audiobooks correctly.
+- Copy bounded, redacted recent log excerpts with clipboard verification and a recoverable timeout.
+- Report unavailable bridge dependencies without repeated command tracebacks.
+- Use the bundled app icon for the running application and web favicon.
+
 ## 0.2.4
 
 - Keep the production updater public key in regular app builds and enable automatic update checks by default, respecting saved preferences.

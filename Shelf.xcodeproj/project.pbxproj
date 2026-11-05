@@ -24,6 +24,7 @@
 		AAA5132F0A3C50EA1C7B27D5 /* ShelfCore in Frameworks */ = {isa = PBXBuildFile; productRef = D3B3D7FE690B7CCB4CC75D90 /* ShelfCore */; };
 		ACE670D79E6CB4B2DA6DCB8D /* shelf_annotations.py in Resources */ = {isa = PBXBuildFile; fileRef = 43AAC851C380CD7E8C14C017 /* shelf_annotations.py */; };
 		BDE45900DBB68F6ECA8E90E7 /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E2AEAFC476556B6591566B /* AppMain.swift */; };
+		C2614A9189534841FB9616CF /* AppIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = 0AC75D60BDD374BD0FD7B0E1 /* AppIcon.png */; };
 		C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 15975E75F118DA6A5F9DDC22 /* AppIcon.icns */; };
 		CA04118D7DFF0280FFF26873 /* app.js in Resources */ = {isa = PBXBuildFile; fileRef = 9096715045380B07144496A7 /* app.js */; };
 		DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */ = {isa = PBXBuildFile; fileRef = 32B8DD740E9D64ABA17E06E1 /* PythonRuntime */; };
@@ -33,6 +34,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0AC75D60BDD374BD0FD7B0E1 /* AppIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = AppIcon.png; sourceTree = "<group>"; };
 		12B67EC8E0475301B4424C41 /* CalibreStackDashboard */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CalibreStackDashboard; path = .; sourceTree = SOURCE_ROOT; };
 		15975E75F118DA6A5F9DDC22 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		20096C905A07887BF87BAB46 /* calibre_fts.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = calibre_fts.py; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 			isa = PBXGroup;
 			children = (
 				9096715045380B07144496A7 /* app.js */,
+				0AC75D60BDD374BD0FD7B0E1 /* AppIcon.png */,
 				5E4687CC9A77B219982C2592 /* index.html */,
 				C1D4B60D9296B03E4CA18373 /* style.css */,
 			);
@@ -245,6 +248,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C465C788E9186F976C5CE510 /* AppIcon.icns in Resources */,
+				C2614A9189534841FB9616CF /* AppIcon.png in Resources */,
 				2067DBFD5830B1256C585E68 /* KOReader in Resources */,
 				DC20E841DFB3867D4A9322D3 /* PythonRuntime in Resources */,
 				CA04118D7DFF0280FFF26873 /* app.js in Resources */,
@@ -430,7 +434,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 49;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -444,7 +448,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.4;
+				MARKETING_VERSION = 0.2.5;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;
@@ -458,7 +462,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 49;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -472,7 +476,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.4;
+				MARKETING_VERSION = 0.2.5;
 				PRODUCT_BUNDLE_IDENTIFIER = app.shelf.dashboard;
 				PRODUCT_NAME = Shelf;
 				SDKROOT = macosx;

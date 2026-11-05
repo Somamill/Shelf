@@ -42,6 +42,28 @@ class BridgeFailureTests(unittest.TestCase):
         self.assertNotIn("private-value", output)
         self.assertNotIn("BRIDGE END", output)
 
+    def test_unavailable_docker_reports_actionable_warning_without_traceback(self):
+        bridge = self.bridge
+        failure = subprocess.CalledProcessError(1, [bridge.DOCKER, "exec", "kosync", "private-value"])
+        with patch.object(bridge, "cmd", side_effect=failure):
+            with self.assertRaises(SystemExit):
+                bridge.main()
+        output = Path(bridge.LOGFILE).read_text()
+        self.assertIn("automatic recovery will retry", output)
+        self.assertNotIn("private-value", output)
+        self.assertNotIn("CalledProcessError", output)
+
+    def test_activity_history_preserves_real_syncs_without_command_noise(self):
+        bridge = self.bridge
+        bridge.log("BRIDGE START")
+        bridge.update_activity_history()
+        bridge.log("SYNCED book=163 fields_updated=1 percentage=0.041 device=Shelf")
+        bridge.log("WARNING unavailable dependency")
+        events = [json.loads(line) for line in (Path(bridge.LOGS)/"reading-activity.jsonl").read_text().splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["bookId"],163)
+        self.assertEqual(events[0]["progress"],0.041)
+
     def test_failed_write_does_not_mark_field_as_synced(self):
         bridge = self.bridge
         book = {"*ko_progint": 10}
