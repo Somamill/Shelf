@@ -48,6 +48,7 @@ class Library:
         path = Path(path or Path.home() / 'Library/Application Support/Shelf/annotations.sqlite')
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=15)
+        self.db.execute("PRAGMA journal_mode=WAL")
         os.chmod(path, 0o600)
         self.db.row_factory = sqlite3.Row
         self.batch = False

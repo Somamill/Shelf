@@ -1,0 +1,29 @@
+--- a/src/connectors/hardcover.ts
++++ b/src/connectors/hardcover.ts
+@@ -311,6 +311,7 @@
+     `query CurrentlyReading {
+        me {
+          user_books(where: { status_id: { _eq: 2 } }, limit: 100) {
++           updated_at
+            book { id title slug release_year rating ratings_count cached_image(path: "url") contributions { author { name } } }
+          }
+        }
+@@ -324,6 +325,7 @@
+     if (b?.id == null || typeof b?.title !== 'string') continue;
+     out.push({
+       externalId: String(b.id),
++      updatedAt: typeof ub.updated_at === 'string' ? ub.updated_at : null,
+       title: b.title,
+       author: b?.contributions?.[0]?.author?.name ?? null,
+       coverURL: b?.cached_image ?? null,
+--- a/src/connectors/types.ts
++++ b/src/connectors/types.ts
+@@ -76,6 +76,8 @@
+ 
+ /** A book on the user's "currently reading" / "in progress" list at a connector. */
+ export interface ExternalBook {
++  /** Real provider activity timestamp; never the time the catalog was fetched. */
++  updatedAt?: string | null;
+   externalId: string;
+   title: string;
+   author?: string | null;

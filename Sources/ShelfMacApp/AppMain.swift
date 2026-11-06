@@ -115,6 +115,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var selectedStudioAudio:URL?
     private var pendingNotionExport:[String:Any]?
     private let annotationQueue=DispatchQueue(label:"app.shelf.annotations",qos:.utility)
+    private let localAnnotationQueue=DispatchQueue(label:"app.shelf.local-annotations",qos:.userInitiated)
     private var pendingAnnotationImport:[String:Any]?
     private var pendingHighlightLink:String?
     private var readwiseImportInProgress=false
@@ -139,6 +140,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerPageLabel:NSTextField?
     private var readerHighlightButton:NSButton?
     private var readerChapterMenu:NSPopUpButton?
+    private var readerContentsButton:NSButton?
+    private var readerContentsPopover:NSPopover?
     private var readerFontMenu:NSPopUpButton?
     private var readerThemeMenu:NSPopUpButton?
     private var readerSpacingMenu:NSPopUpButton?
@@ -148,6 +151,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var readerSettingsPopover:NSPopover?
     private let coverSourceLock=NSLock()
     private var coverSources:[Int:[String:Any]] = [:]
+    private var externalCoversInFlight=Set<String>()
+    private var connectorSnapshotAvailable=false
     private let coverRepairLock=NSLock()
     private var coverRepairsInFlight=Set<Int>()
     private let coverLookupLock=NSLock()
@@ -332,6 +337,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
 
+    func applicationDidBecomeActive(_ notification:Notification) {
+        guard webView != nil else { return }
+        refresh()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if webView === readerWebView {
             applyPendingReaderResume()
@@ -428,6 +438,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "repairMissingBookCover": if let bookId=body["bookId"] as? Int { repairMissingBookCover(bookId) }
         case "saveBookCover": if let bookId=body["bookId"] as? Int,let url=body["url"] as? String { saveBookCover(bookId,url:url) }
         case "loadAppleBooks": loadAppleBooks()
+        case "loadExternalCover": if let url=body["url"] as? String { loadExternalCover(url) }
         case "importAppleBooksCatalog": importAppleBooksCatalog()
         case "openAppleBooks":
             let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.iBooksX") ?? URL(fileURLWithPath:"/System/Applications/Books.app")
@@ -827,7 +838,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 while sqlite3_step(columnQuery) == SQLITE_ROW { if let name=sqlite3_column_text(columnQuery,1) { columns.insert(String(cString:name).uppercased()) } }
                 sqlite3_finalize(columnQuery)
             }
-            let mapping:[(String,String)]=[("title","ZTITLE"),("author","ZAUTHOR"),("progress","ZREADINGPROGRESS"),("highWater","ZHIGHWATERMARKPROGRESS"),("duration","ZDURATION"),("assetId","ZASSETID"),("guid","ZPERMANENTID"),("coverURL","ZURL"),("kind","ZKIND"),("audioFlag","ZISSTOREAUDIOBOOK"),("finished","ZISFINISHED"),("lastOpened","ZLASTOPENDATE"),("lastEngaged","ZLASTENGAGEDDATE"),("hidden","ZHIDDEN"),("sample","ZISSAMPLE"),("supplemental","ZISSUPPLEMENTAL")]
+            let mapping:[(String,String)]=[("title","ZTITLE"),("language","ZLANGUAGE"),("author","ZAUTHOR"),("progress","ZREADINGPROGRESS"),("highWater","ZHIGHWATERMARKPROGRESS"),("duration","ZDURATION"),("assetId","ZASSETID"),("guid","ZPERMANENTID"),("coverURL","ZCOVERURL"),("kind","ZKIND"),("audioFlag","ZISSTOREAUDIOBOOK"),("finished","ZISFINISHED"),("lastOpened","ZLASTOPENDATE"),("lastEngaged","ZLASTENGAGEDDATE"),("hidden","ZHIDDEN"),("sample","ZISSAMPLE"),("supplemental","ZISSUPPLEMENTAL")]
             let available=mapping.filter{columns.contains($0.1)}
             guard available.contains(where:{$0.0=="title"}),available.contains(where:{["progress","highWater"].contains($0.0)}) else {
                 return ["status":"unsupported_schema","books":[]]
@@ -842,9 +853,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             func value(_ key:String)->String? { indices[key].flatMap{text($0)} }
             func date(_ key:String)->String? {
                 guard let index=indices[key],let raw=number(index),raw>0 else { return nil }
-                let seconds=raw < 500_000_000 ? raw+978_307_200 : raw
                 let formatter=ISO8601DateFormatter();formatter.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
-                return formatter.string(from:Date(timeIntervalSince1970:seconds))
+                return formatter.string(from:Date(timeIntervalSinceReferenceDate:raw))
             }
             while sqlite3_step(rows) == SQLITE_ROW {
                 guard let title=value("title"),!title.isEmpty else { continue }
@@ -853,7 +863,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 let progressIndex=indices["progress"] ?? indices["highWater"]!
                 let progress=min(1,max(0,number(progressIndex) ?? 0))
                 let duration=indices["duration"].flatMap{number($0)}.map{Int(max(0,$0))}
-                result.append(["title":title,"author":value("author") ?? "","mediaType":audio ? "audiobook":"book","progress":progress,"duration":duration as Any? ?? NSNull(),"assetId":value("assetId") as Any? ?? NSNull(),"guid":value("guid") as Any? ?? NSNull(),"coverURL":value("coverURL") as Any? ?? NSNull(),"finished":(indices["finished"].map{number($0) ?? 0 > 0} ?? false) || progress >= 0.97,"lastOpened":date("lastOpened") as Any? ?? NSNull(),"lastEngaged":date("lastEngaged") as Any? ?? NSNull()])
+                result.append(["title":title,"language":value("language") ?? "","author":value("author") ?? "","mediaType":audio ? "audiobook":"book","progress":progress,"duration":duration as Any? ?? NSNull(),"assetId":value("assetId") as Any? ?? NSNull(),"guid":value("guid") as Any? ?? NSNull(),"coverURL":value("coverURL") as Any? ?? NSNull(),"finished":(indices["finished"].map{number($0) ?? 0 > 0} ?? false) || progress >= 0.97,"lastOpened":date("lastOpened") as Any? ?? NSNull(),"lastEngaged":date("lastEngaged") as Any? ?? NSNull()])
             }
             sqlite3_finalize(rows)
             result.sort{String(describing:$0["lastEngaged"] ?? $0["lastOpened"] ?? "") > String(describing:$1["lastEngaged"] ?? $1["lastOpened"] ?? "")}
@@ -993,14 +1003,23 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let documents=payload["syncDocuments"] as? [String] ?? [document]
             let pendingPosition=self.readerProgressStore.pending().last { ($0["bookId"] as? Int) == bookId }
             reader["resumePercentage"]=pendingPosition?["percentage"] ?? 0
-            self.annotationQueue.sync { self.migrateAnnotations() }
-            _=self.annotationResult(["action":"bookMetadata","bookId":bookId,"title":payload["title"] ?? "","author":payload["authors"] ?? ""])
-            let annotations=self.annotationResult(["action":"list","rules":["bookId":bookId]])
-            reader["savedHighlights"]=annotations["items"] ?? []
+            reader["savedHighlights"]=[]
             reader["focusHighlight"]=highlight ?? [:]
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.showReader(reader,htmlURL:URL(fileURLWithPath:htmlPath),workDirectory:URL(fileURLWithPath:workDir,isDirectory:true))
+                self.localAnnotationQueue.async { [weak self] in
+                    guard let self else { return }
+                    self.migrateAnnotations()
+                    _=self.annotationResult(["action":"bookMetadata","bookId":bookId,"title":payload["title"] ?? "","author":payload["authors"] ?? ""])
+                    let annotations=self.annotationResult(["action":"list","rules":["bookId":bookId]])
+                    let items=annotations["items"] as? [[String:Any]] ?? []
+                    guard let bytes=try? JSONSerialization.data(withJSONObject:items),let json=String(data:bytes,encoding:.utf8) else { return }
+                    DispatchQueue.main.async {
+                        guard (self.activeReader?["bookId"] as? Int)==bookId else { return }
+                        self.readerWebView?.evaluateJavaScript("window.readerBook.savedHighlights=\(json);window.readerApplySavedHighlights&&window.readerApplySavedHighlights();",completionHandler:nil)
+                    }
+                }
                 DispatchQueue.global(qos:.utility).async { [weak self] in
                     guard let self, pendingPosition == nil, highlight == nil, UserDefaults.standard.dictionary(forKey:"annotationSettings")?["restorePosition"] as? Bool != false, let saved=self.fetchReaderProgress(documents) else { return }
                     DispatchQueue.main.async {
@@ -1086,6 +1105,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let config=WKWebViewConfiguration(); config.userContentController=content
         let readerData:[String:Any]=[
             "bookId":payload["bookId"] ?? 0,
+            "toc":payload["chapters"] ?? [],
             "document":payload["document"] ?? "",
             "syncDocuments":payload["syncDocuments"] ?? [payload["document"] ?? ""],
             "title":title,
@@ -1126,13 +1146,14 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             (function(){
               window.readerBook=\(source);
               const style=document.createElement('style');
-              style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:auto;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:88px 280px 104px;column-width:790px;column-gap:560px;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow :where(p,div,section,article,span,h1,h2,h3,h4,h5,h6,li,blockquote){color:inherit!important;background-color:transparent!important}#reader-flow a{color:#669dff!important}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
+              style.textContent='html,body{height:100%!important;overflow:hidden!important;background:var(--reader-paper)!important}body{margin:0!important;padding:0!important;max-width:none!important;font-family:var(--reader-font)!important;font-size:var(--reader-size)!important;line-height:var(--reader-leading)!important;color:var(--reader-ink)!important;transition:background-color .18s,color .18s}#reader-viewport{position:fixed;inset:0;overflow-x:auto;overflow-y:hidden;scroll-behavior:auto;scroll-snap-type:x mandatory;scrollbar-width:none;background:var(--reader-paper)}#reader-viewport::-webkit-scrollbar{display:none}#reader-flow{box-sizing:border-box!important;width:100vw!important;max-width:none!important;height:100%!important;padding:48px 280px 104px;column-width:790px;column-gap:560px;column-fill:auto!important;orphans:2;widows:2;transition:font-size .18s;overflow:visible}#reader-flow>div,#reader-flow>section{break-inside:auto!important;max-width:none!important}#reader-flow p{margin:0 0 1.15em!important}#reader-flow h1,#reader-flow h2,#reader-flow h3,#reader-flow h4{line-height:1.4!important;margin:1.4em 0 .7em!important;break-after:avoid;scroll-margin-top:18px}#reader-flow img{max-width:min(56vw,560px)!important;max-height:48vh!important;width:auto!important;height:auto!important;object-fit:contain;break-inside:avoid;display:block;margin-inline:auto}#reader-flow svg{width:min(56vw,560px)!important;height:auto!important;max-height:48vh!important;break-inside:avoid;display:block;margin-inline:auto}#reader-flow blockquote{margin-inline-start:1.4em!important}#reader-flow pre{white-space:pre-wrap!important}#reader-flow table{max-width:100%;font-size:.9em}#reader-flow :where(p,div,section,article,span,h1,h2,h3,h4,h5,h6,li,blockquote){color:inherit!important;background-color:transparent!important;font-family:inherit!important}#reader-flow a{color:#669dff!important}#reader-flow mark.reader-highlight{background:#ffe08a!important;color:inherit!important;border-radius:2px}';document.head.appendChild(style);
               let lastSent=-1,lastCandidate=0,lastChapter=-1,lastPositionSent=0,lastProgressAttempt=0,progressSyncPending=false,allowProgressSync=false,userHasNavigated=false,pageCount=1,currentPage=0,readerViewport=null,readerFlow=null;
               window.readerApplyPreferences=function(p){const japanese=(String(window.readerBook.language||'').toLowerCase().startsWith('ja')||/[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(window.readerBook.title||''));const fonts={serif:japanese?'"Noto Serif CJK JP","Hiragino Mincho ProN",serif':'"Noto Serif","Charter",Georgia,serif',sans:japanese?'"Noto Sans CJK JP","Hiragino Sans",sans-serif':'"Noto Sans",-apple-system,BlinkMacSystemFont,sans-serif',system:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'};const themes={light:['#ffffff','#222222'],paper:['#f6f3eb','#302c24'],night:['#17191b','#e7e4dd'],oled:['#000000','#f1f1f3']};const palette=p.theme==='auto'?(p.appearance==='dark'?themes.oled:themes.paper):(themes[p.theme]||themes.paper);const leading={compact:'1.55',normal:'1.72',relaxed:'1.9'};const root=document.documentElement;root.style.colorScheme=(palette===themes.oled||palette===themes.night)?'dark':'light';root.style.setProperty('--reader-font',fonts[p.font]||fonts.sans);root.style.setProperty('--reader-size',(Number(p.size)||19)+'px');root.style.setProperty('--reader-leading',leading[p.spacing]||leading.normal);root.style.setProperty('--reader-paper',palette[0]);root.style.setProperty('--reader-ink',palette[1]);if(readerFlow)readerFlow.style.fontFamily=fonts[p.font]||fonts.sans;if(readerFlow)readerFlow.style.fontSize=(Number(p.size)||19)+'px';setTimeout(()=>{if(readerViewport){layoutPages();setPage(currentPage,false)}},80)};
               let titleKey=(window.readerBook.title||'').trim().toLocaleLowerCase();
               const chapterEntries=[],seenChapterTargets=new Set();
+              for(const entry of window.readerBook.toc||[]){const target=document.getElementById(entry.id);if(target&&!seenChapterTargets.has(target)){seenChapterTargets.add(target);chapterEntries.push({element:target,title:entry.title,depth:entry.depth||0})}}
               const tocLinks=Array.from(document.querySelectorAll('.p-toc a, #toc a, [role="doc-toc"] a')).concat(Array.from(document.querySelectorAll('nav')).filter(n=>/(^|\\s)toc(\\s|$)/i.test(n.getAttribute('epub:type')||n.getAttributeNS('http://www.idpf.org/2007/ops','type')||'')).flatMap(n=>Array.from(n.querySelectorAll('a'))));
-              for(const a of tocLinks){try{const url=new URL(a.getAttribute('href')||'',document.baseURI),id=decodeURIComponent(url.hash.slice(1)),target=id?document.getElementById(id):null;if(target&&!seenChapterTargets.has(target)){seenChapterTargets.add(target);chapterEntries.push({element:target,title:(a.innerText||a.textContent||target.innerText||target.textContent||'').trim().replace(/\\s+/g,' ').slice(0,100)})}}catch(_){}}
+              if(!chapterEntries.length)for(const a of tocLinks){try{const url=new URL(a.getAttribute('href')||'',document.baseURI),id=decodeURIComponent(url.hash.slice(1)),target=id?document.getElementById(id):null;if(target&&!seenChapterTargets.has(target)){seenChapterTargets.add(target);chapterEntries.push({element:target,title:(a.innerText||a.textContent||target.innerText||target.textContent||'').trim().replace(/\\s+/g,' ').slice(0,100)})}}catch(_){}}
               // Calibre's HTMLZ conversion often flattens EPUB heading tags into
               // div.main nodes and emits its ToC as ordinary fragment links.
               // Those links have no nav/ToC class, so the old selector missed
@@ -1146,7 +1167,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
               // source for the chapter menu and previous/next chapter controls.
               chapterEntries.sort((a,b)=>{const relation=a.element.compareDocumentPosition(b.element);if(relation&Node.DOCUMENT_POSITION_FOLLOWING)return -1;if(relation&Node.DOCUMENT_POSITION_PRECEDING)return 1;return 0});
               const headings=chapterEntries.map(entry=>entry.element);headings.forEach((h,i)=>{if(!h.id)h.id='reader-section-'+i});
-              window.readerChapters=chapterEntries.map((entry,i)=>({title:entry.title||('Section '+(i+1)),id:entry.element.id}));
+              window.readerChapters=chapterEntries.map((entry,i)=>({title:entry.title||('Section '+(i+1)),id:entry.element.id,depth:entry.depth||0}));
               function step(){return readerViewport?readerViewport.clientWidth:window.innerWidth}
               function layoutPages(){if(!readerViewport||!readerFlow)return;const previousCount=pageCount,previousProgress=pageCount<=1?0:currentPage/(pageCount-1);const width=step(),column=Math.max(280,Math.min(790,width-108)),margin=Math.max(54,(width-column)/2),gap=Math.max(0,width-column);readerFlow.style.width=width+'px';readerFlow.style.paddingLeft=margin+'px';readerFlow.style.paddingRight=margin+'px';readerFlow.style.columnWidth=column+'px';readerFlow.style.columnGap=gap+'px';const extent=Math.max(width,readerFlow.scrollWidth);pageCount=Math.max(1,Math.ceil((extent-1)/width));if(pageCount!==previousCount){const anchor=userHasNavigated?previousProgress:Number(window.readerBook.resumePercentage||0);currentPage=Math.round(Math.max(0,Math.min(1,anchor))*(pageCount-1));readerViewport.scrollLeft=currentPage*width}currentPage=Math.max(0,Math.min(pageCount-1,currentPage));}
               function chapterIndex(){let result=0,scroll=readerViewport?readerViewport.scrollLeft:0,best=-Infinity;for(let n=0;n<headings.length;n++){const x=headings[n].getBoundingClientRect().left+scroll;if(x<=scroll+step()*.42&&x>best){best=x;result=n}}return result;}
@@ -1207,7 +1228,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             guard let self,self.activeReader != nil,NSApp.keyWindow === self.window,
                   event.modifierFlags.intersection([.command,.control,.option]).isEmpty,
                   !(self.window.firstResponder is NSTextView),
-                  self.readerSettingsPopover?.isShown != true else { return event }
+                  self.readerSettingsPopover?.isShown != true,self.readerContentsPopover?.isShown != true else { return event }
             let code=event.keyCode
             if [123,124,116,121,49].contains(code) {
                 let previous=code == 123 || code == 116 || (code == 49 && event.modifierFlags.contains(.shift))
@@ -1226,6 +1247,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         back.isBordered=false; back.toolTip="Back to library"; back.setContentHuggingPriority(.required,for:.horizontal); back.imagePosition = .imageOnly
         back.widthAnchor.constraint(equalToConstant:32).isActive=true; back.heightAnchor.constraint(equalToConstant:32).isActive=true
         let chapter=NSPopUpButton(frame:.zero,pullsDown:false); chapter.addItem(withTitle:"Contents"); chapter.target=self; chapter.action=#selector(readerSelectChapter(_:)); chapter.cell?.lineBreakMode = .byTruncatingTail; chapter.widthAnchor.constraint(equalToConstant:160).isActive=true; chapter.controlSize = .small; readerChapterMenu=chapter
+        let contents=NSButton(title:"Contents",image:NSImage(systemSymbolName:"list.bullet",accessibilityDescription:"Book chapters")!,target:self,action:#selector(showReaderContents(_:)))
+        contents.bezelStyle = .rounded;contents.imagePosition = .imageLeading;contents.widthAnchor.constraint(equalToConstant:190).isActive=true;contents.lineBreakMode = .byTruncatingTail
+        contents.toolTip="Search and navigate book chapters";readerContentsButton=contents
         let top=NSStackView(views:[back]); top.orientation = .horizontal; top.alignment = .centerY; top.distribution = .fill; top.translatesAutoresizingMaskIntoConstraints=false
 
         let previous=NSButton(image:NSImage(systemSymbolName:"chevron.left",accessibilityDescription:"Previous page")!,target:self,action:#selector(readerPreviousPage))
@@ -1246,22 +1270,29 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         previous.toolTip="Previous page (←)"; next.toolTip="Next page (→)"; previous.setAccessibilityLabel("Previous page"); next.setAccessibilityLabel("Next page")
         highlight.setAccessibilityLabel("Highlight selection")
         appearance.setAccessibilityLabel("Reading appearance")
-        let bottom=NSStackView(views:[previous,pages,next,chapter,highlight,appearance]); bottom.orientation = .horizontal; bottom.alignment = .centerY; bottom.distribution = .fill; bottom.spacing=11; bottom.translatesAutoresizingMaskIntoConstraints=false
+        let bottom=NSStackView(views:[back,previous,pages,next,contents,highlight,appearance]); bottom.orientation = .horizontal; bottom.alignment = .centerY; bottom.distribution = .fill; bottom.spacing=11; bottom.translatesAutoresizingMaskIntoConstraints=false
         bottom.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         let dock=NSVisualEffectView(frame:.zero); dock.translatesAutoresizingMaskIntoConstraints=false; dock.material = .hudWindow; dock.blendingMode = .withinWindow; dock.state = .active
         dock.wantsLayer=true; dock.layer?.cornerRadius=20; dock.layer?.masksToBounds=true; dock.layer?.borderWidth=1; dock.layer?.borderColor=NSColor.separatorColor.withAlphaComponent(0.28).cgColor
         dock.addSubview(bottom)
-        let titleCapsule=NSVisualEffectView(frame:.zero); titleCapsule.translatesAutoresizingMaskIntoConstraints=false; titleCapsule.material = .hudWindow; titleCapsule.blendingMode = .withinWindow; titleCapsule.state = .active
-        titleCapsule.wantsLayer=true; titleCapsule.layer?.cornerRadius=17; titleCapsule.layer?.masksToBounds=true; titleCapsule.layer?.borderWidth=1; titleCapsule.layer?.borderColor=NSColor.separatorColor.withAlphaComponent(0.28).cgColor
-        toolbar.addSubview(titleCapsule); toolbar.addSubview(dock); titleCapsule.addSubview(top)
+        toolbar.addSubview(dock)
         NSLayoutConstraint.activate([
-            titleCapsule.topAnchor.constraint(equalTo:toolbar.topAnchor,constant:4),titleCapsule.leadingAnchor.constraint(equalTo:toolbar.leadingAnchor,constant:8),titleCapsule.widthAnchor.constraint(equalToConstant:42),titleCapsule.heightAnchor.constraint(equalToConstant:42),
-            top.leadingAnchor.constraint(equalTo:titleCapsule.leadingAnchor,constant:5),top.trailingAnchor.constraint(equalTo:titleCapsule.trailingAnchor,constant:-5),top.centerYAnchor.constraint(equalTo:titleCapsule.centerYAnchor),top.heightAnchor.constraint(equalToConstant:32),
             dock.centerXAnchor.constraint(equalTo:toolbar.centerXAnchor),dock.bottomAnchor.constraint(equalTo:toolbar.bottomAnchor,constant:-22),dock.widthAnchor.constraint(lessThanOrEqualToConstant:900),dock.leadingAnchor.constraint(greaterThanOrEqualTo:toolbar.leadingAnchor),dock.trailingAnchor.constraint(lessThanOrEqualTo:toolbar.trailingAnchor),dock.heightAnchor.constraint(equalToConstant:58),
             bottom.leadingAnchor.constraint(equalTo:dock.leadingAnchor,constant:13),bottom.trailingAnchor.constraint(equalTo:dock.trailingAnchor,constant:-13),bottom.centerYAnchor.constraint(equalTo:dock.centerYAnchor),bottom.heightAnchor.constraint(equalToConstant:38),
             dock.bottomAnchor.constraint(greaterThanOrEqualTo:toolbar.bottomAnchor,constant:-80)
         ])
         return toolbar
+    }
+
+    @objc private func showReaderContents(_ sender:NSButton) {
+        guard !readerChapters.isEmpty else { return }
+        if let popover=readerContentsPopover,popover.isShown { popover.performClose(sender);return }
+        let controller=ReaderContentsController(chapters:readerChapters,selected:readerChapterMenu?.indexOfSelectedItem ?? 0) { [weak self] index in
+            self?.readerWebView?.evaluateJavaScript("window.readerGoTo(\(index))",completionHandler:nil)
+            self?.readerContentsPopover?.performClose(nil)
+        }
+        let popover=NSPopover();popover.behavior = .transient;popover.contentViewController=controller
+        readerContentsPopover=popover;popover.show(relativeTo:sender.bounds,of:sender,preferredEdge:.minY)
     }
 
     @objc private func showReaderAppearance(_ sender:NSButton) {
@@ -1311,11 +1342,11 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard let menu=readerChapterMenu else { return }
         menu.removeAllItems()
         for (index,chapter) in chapters.enumerated() {
-            let title=(chapter["title"] as? String ?? "Section \(index+1)")
+            let title=String(repeating:"  ",count:min(4,chapter["depth"] as? Int ?? 0))+(chapter["title"] as? String ?? "Section \(index+1)")
             menu.addItem(withTitle:title)
             menu.lastItem?.tag=index
         }
-        if chapters.isEmpty { menu.addItem(withTitle:"No chapter headings") }
+        if chapters.isEmpty { menu.addItem(withTitle:"No chapter headings") };readerContentsButton?.isEnabled = !chapters.isEmpty
     }
 
     private func updateReaderPosition(_ info:[String:Any]) {
@@ -1333,7 +1364,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         readerProgressLabel?.stringValue="\(Int((percentage*100).rounded()))%"
         let page=max(1,(info["page"] as? Int) ?? 1),pages=max(1,(info["pages"] as? Int) ?? 1)
         readerPageLabel?.stringValue="\(page) / \(pages)"
-        if let chapter=info["chapter"] as? Int,let menu=readerChapterMenu,chapter>=0,chapter<menu.numberOfItems { menu.selectItem(at:chapter) }
+        if let chapter=info["chapter"] as? Int,let menu=readerChapterMenu,chapter>=0,chapter<menu.numberOfItems { menu.selectItem(at:chapter);readerContentsButton?.title=readerChapters[chapter]["title"] as? String ?? "Contents" }
     }
 
     private func navigateReaderChapter(_ offset:Int) {
@@ -1373,6 +1404,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         readerWebView?.stopLoading()
         readerWebView?.configuration.userContentController.removeScriptMessageHandler(forName:"reader")
         readerSettingsPopover?.performClose(nil); readerSettingsPopover=nil
+        readerContentsPopover?.performClose(nil);readerContentsPopover=nil;readerContentsButton=nil
         readerWebView=nil; readerContentView=nil; activeReader=nil; readerTempDirectory=nil; readerWorkIsPersistentCache=false
         readerChapterMenu=nil; readerFontMenu=nil; readerThemeMenu=nil; readerSpacingMenu=nil; readerSizeLabel=nil; readerProgressSlider=nil; readerProgressLabel=nil; readerPageLabel=nil; readerHighlightButton=nil; readerChapters=[]
         window.contentView=dashboardContentView
@@ -1387,7 +1419,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         item["bookId"]=reader["bookId"] ?? 0; item["title"]=reader["title"] ?? ""
         item["author"]=reader["authors"] ?? ""; item["source"]="Shelf"
         item["document"]=reader["document"] ?? ""
-        annotationQueue.async { [weak self] in
+        localAnnotationQueue.async { [weak self] in
             guard let self else { return }
             self.migrateAnnotations()
             let result=self.annotationResult(["action":"add","item":item,"all":true])
@@ -1760,7 +1792,8 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
             openBook(book,highlight:item); return
         }
-        annotationQueue.async { [weak self] in
+        let workQueue=["sync","importReadwise"].contains(action) ? annotationQueue : localAnnotationQueue
+        workQueue.async { [weak self] in
             guard let self else { return }
             self.migrateAnnotations()
             var payload=body; payload.removeValue(forKey:"type"); payload["all"]=true
@@ -2036,6 +2069,48 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         DispatchQueue.main.async { self.send("readerNotice",["message":message]) }
     }
 
+    private func loadExternalCover(_ raw:String) {
+        guard let url=URL(string:raw),url.scheme == "https",let host=url.host,
+              host == "assets.hardcover.app" || host == "covers.openlibrary.org" || host.hasSuffix(".mzstatic.com") || (host == "itunes.apple.com" && url.path == "/lookup") else {
+            send("externalCoverLoaded",["url":raw,"coverData":NSNull()]); return
+        }
+        guard externalCoversInFlight.insert(raw).inserted else { return }
+        let key=SHA256.hash(data:Data(raw.utf8)).map{String(format:"%02x",$0)}.joined()
+        let cache=URL(fileURLWithPath:"\(statePath)/dashboard-covers/\(key).jpg")
+        let finish: (Data?)->Void = { [weak self] data in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.externalCoversInFlight.remove(raw)
+                self.send("externalCoverLoaded",["url":raw,"coverData":data.map{"data:image/jpeg;base64,"+$0.base64EncodedString()} as Any? ?? NSNull()])
+            }
+        }
+        DispatchQueue.global(qos:.utility).async {
+            if let cached=try? Data(contentsOf:cache),!cached.isEmpty { finish(cached); return }
+            func fetch(_ target:URL) {
+            URLSession.shared.dataTask(with:URLRequest(url:target,timeoutInterval:15)) { data,response,_ in
+                guard (response as? HTTPURLResponse)?.statusCode == 200,let data,data.count<=8*1024*1024 else { finish(nil); return }
+                if target.host == "itunes.apple.com" {
+                    guard let result=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+                          let first=(result["results"] as? [[String:Any]])?.first,
+                          let artwork=(first["artworkUrl600"] ?? first["artworkUrl100"]) as? String,
+                          let imageURL=URL(string:artwork.replacingOccurrences(of:"100x100bb",with:"600x600bb")),imageURL.scheme == "https",imageURL.host?.hasSuffix(".mzstatic.com") == true else { finish(nil); return }
+                    fetch(imageURL); return
+                }
+                guard let source=CGImageSourceCreateWithData(data as CFData,nil),
+                      let image=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceThumbnailMaxPixelSize:520] as CFDictionary) else { finish(nil); return }
+                let output=NSMutableData()
+                guard let destination=CGImageDestinationCreateWithData(output,UTType.jpeg.identifier as CFString,1,nil) else { finish(nil); return }
+                CGImageDestinationAddImage(destination,image,[kCGImageDestinationLossyCompressionQuality:0.82] as CFDictionary)
+                guard CGImageDestinationFinalize(destination) else { finish(nil); return }
+                try? FileManager.default.createDirectory(at:cache.deletingLastPathComponent(),withIntermediateDirectories:true)
+                try? (output as Data).write(to:cache,options:.atomic)
+                finish(output as Data)
+            }.resume()
+            }
+            fetch(url)
+        }
+    }
+
     private func withCover(_ source:[String:Any])->[String:Any] {
         var book=source
         guard let path=source["coverPath"] as? String, !path.isEmpty,
@@ -2099,6 +2174,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             switch result {
             case .failure(let error): DispatchQueue.main.async { self.send("discoveryError",["period":period,"message":error.localizedDescription]) }
             case .success(let books):
+                guard self.currentDiscoveryPeriod == period else { return }
                 let label:[String:String]=["weekly":"Trending this week on Hardcover","monthly":"Trending this month on Hardcover","yearly":"Trending this year on Hardcover","all-time":"All-time trending on Hardcover"]
                 DispatchQueue.main.async { self.send("discoveryData",["period":period,"basis":label[period] ?? "Hardcover trending","books":books,"loadedAt":Self.iso(Date()),"source":"Hardcover"]) }
             }
@@ -2119,6 +2195,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     // Read only connection metadata from CrossPoint Sync. Never select or return
     // encrypted credentials, account labels, or provider error text.
     private func readConnectorStatuses() -> [[String:Any]] {
+        connectorSnapshotAvailable=false
         let key=syncAuthKey()
         guard !key.isEmpty,let url=URL(string:"\(service("crosspointApi", fallback: "http://127.0.0.1:17303"))/api/v1/connectors") else { return [] }
         var request=URLRequest(url:url,timeoutInterval:4)
@@ -2132,6 +2209,7 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard semaphore.wait(timeout:.now()+4) == .success,status == 200,
               let payload,let root=try? JSONSerialization.jsonObject(with:payload) as? [String:Any],
               let connectors=root["connectors"] as? [[String:Any]] else { return [] }
+        connectorSnapshotAvailable=true
         return connectors.compactMap { item in
             guard item["linked"] as? Bool == true else { return nil }
             let queue=item["queue"] as? [String:Any] ?? [:]
@@ -2277,9 +2355,10 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let plugin=(try? Data(contentsOf:URL(fileURLWithPath:"\(home)/Library/Preferences/calibre/plugins/KOReader Sync.json"))).flatMap { try? JSONSerialization.jsonObject(with:$0) as? [String:Any] } ?? [:]
         let redis=Self.run(dockerPath,["exec","kosync","redis-cli","--raw","-n","1","GET","user:\(username):key"]).output.trimmingCharacters(in:.whitespacesAndNewlines)
         let shared=(md5(pass) == (plugin["progress_sync_password"] as? String ?? "") && md5(pass) == redis)
+        let connectorRows=readConnectorStatuses()
         let readerOPDS=service("readerOpds",fallback:"http://\(ip):8080/opds")
         let readerSync=service("readerSync",fallback:"http://\(ip):17200")
-        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"syncActivity":readSyncActivity(),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(localCredential("readwise-reader-token") ?? "").isEmpty,"connectors":readConnectorStatuses(),"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
+        return ["generatedAt":iso(Date()),"ip":ip,"items":items,"events":Array(events.prefix(40)),"syncActivity":readSyncActivity(),"updates":updates,"sharedPasswordAligned":shared,"readwiseConnected":!(localCredential("readwise-reader-token") ?? "").isEmpty,"connectors":connectorRows,"connectorsAvailable":connectorSnapshotAvailable,"config":["username":username,"library":libraryPath,"bridge":bridgeScriptPath,"plugin":"~/Library/Preferences/calibre/plugins/KOReader Sync.json","opds":readerOPDS,"sync":readerSync,"import":importPath,"connections":configuration.strings("connections"),"connectionsConfigured":configuration.bool("connectionsConfigured")]]
     }
 
     private func confirmAndRun(_ id:String) {
@@ -2959,6 +3038,9 @@ final class DashboardApp: NSObject, NSApplicationDelegate, WKScriptMessageHandle
 
     private func humanLogSummary(_ source:String)->String {
         let line=compactDiagnosticLine(source)
+        if line.localizedCaseInsensitiveContains("Import pass beendet") { return "Book import completed." }
+        if line.localizedCaseInsensitiveContains("Keine neuen") { return "No new books waiting to import." }
+        if line.localizedCaseInsensitiveContains("Erfolgreich") { return "Book processing completed successfully." }
         if line.contains("UNMATCHED") { return "A reader position needs title metadata before it can be linked to a book." }
         if let match=try? NSRegularExpression(pattern:#"\bSYNCED\s+book=\d+.*?percentage=([0-9]*\.?[0-9]+).*?device=([^\r\n]+)"#),
            let found=match.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)),

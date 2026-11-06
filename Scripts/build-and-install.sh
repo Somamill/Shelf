@@ -107,7 +107,7 @@ else
   swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx14.0" \
     -emit-module -emit-library -module-name ShelfCore \
     -emit-module-path "$RESOURCES/ShelfCore.swiftmodule" \
-    -o "$RESOURCES/libShelfCore.dylib" "$PROJECT_ROOT/Sources/ShelfCore/ShelfCore/SetupModels.swift"
+    -o "$RESOURCES/libShelfCore.dylib" "$PROJECT_ROOT"/Sources/ShelfCore/ShelfCore/*.swift
   SPARKLE_DIR="$BUILD_ROOT/Sparkle"
   bash "$PROJECT_ROOT/Scripts/download-sparkle.sh" "$SPARKLE_DIR"
   SPARKLE_FRAMEWORKS="$SPARKLE_DIR/Sparkle.xcframework/macos-arm64_x86_64"
@@ -118,9 +118,9 @@ else
     -Xlinker -rpath -Xlinker '@executable_path/../Frameworks' \
     -framework AppKit -framework WebKit -framework Vision -framework PDFKit -I "$RESOURCES" -L "$RESOURCES" -lShelfCore \
     -Xlinker -rpath -Xlinker '@executable_path/../Resources' \
-    -o "$CONTENTS/MacOS/Shelf" "$PROJECT_ROOT/Sources/ShelfMacApp/AppMain.swift"
+    -o "$CONTENTS/MacOS/Shelf" "$PROJECT_ROOT"/Sources/ShelfMacApp/*.swift
   cp "$PROJECT_ROOT/Resources/Dashboard/index.html" "$PROJECT_ROOT/Resources/Dashboard/style.css" \
-    "$PROJECT_ROOT/Resources/Dashboard/app.js" "$PROJECT_ROOT/Resources/Icons/AppIcon.icns" \
+    "$PROJECT_ROOT/Resources/Dashboard/app.js" "$PROJECT_ROOT/Resources/Dashboard/AppIcon.png" "$PROJECT_ROOT/Resources/Icons/AppIcon.icns" \
     "$PROJECT_ROOT/Sources/ShelfCore/Tools/"*.py "$PROJECT_ROOT/Config/config.example.json" "$RESOURCES/"
   ditto "$PROJECT_ROOT/Resources/PythonRuntime" "$RESOURCES/PythonRuntime"
   cat > "$CONTENTS/Info.plist" <<'PLIST'

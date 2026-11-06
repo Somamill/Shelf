@@ -168,7 +168,8 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(len(self.lib.items()),1)
 
     def test_apple_books_supported_schema_is_read_only(self):
-        path=Path(self.temp.name)/'annotations.sqlite3'
+        apple_root=Path(self.temp.name)/'apple'; apple_root.mkdir()
+        path=apple_root/'annotations.sqlite3'
         conn=sqlite3.connect(path)
         conn.execute('CREATE TABLE ZAEANNOTATION (ZANNOTATIONSELECTEDTEXT TEXT,ZANNOTATIONASSETID TEXT,ZANNOTATIONUUID TEXT,ZANNOTATIONNOTE TEXT,ZANNOTATIONDELETED INTEGER)')
         conn.execute("INSERT INTO ZAEANNOTATION VALUES ('A quote','asset','uuid','note',0)")
