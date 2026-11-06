@@ -2,6 +2,7 @@
 from pathlib import Path, PurePosixPath
 import copy
 import html
+import html.entities
 import json
 import posixpath
 import re
@@ -24,6 +25,16 @@ def resolve(base, href):
     return path,urllib.parse.unquote(parsed.fragment)
 
 
+def parse_xml(data):
+    # XHTML often uses the standard HTML named entities through a DTD. Resolve
+    # only that fixed built-in set, without loading external DTDs or resources.
+    def entity(match):
+        name=match.group(1).decode('ascii')
+        code=html.entities.name2codepoint.get(name)
+        return ('&#'+str(code)+';').encode('ascii') if code else match.group(0)
+    return ET.fromstring(re.sub(rb'&([A-Za-z][A-Za-z0-9]+);',entity,data))
+
+
 def prepare_epub(source: Path, staging: Path):
     content=staging/'content'; book=content/'book'; book.mkdir(parents=True)
     with zipfile.ZipFile(source) as archive:
@@ -34,9 +45,9 @@ def prepare_epub(source: Path, staging: Path):
             target=(book/item.filename).resolve()
             if not target.is_relative_to(book.resolve()):
                 raise ValueError('EPUB contains an unsafe archive path')
-        container=ET.fromstring(archive.read('META-INF/container.xml'))
+        container=parse_xml(archive.read('META-INF/container.xml'))
         opf=next(x.attrib['full-path'] for x in container.iter() if local(x.tag)=='rootfile')
-        package=ET.fromstring(archive.read(opf))
+        package=parse_xml(archive.read(opf))
         manifest={x.attrib['id']:x.attrib for x in package.iter() if local(x.tag)=='item'}
         spine=next(x for x in package.iter() if local(x.tag)=='spine')
         ordered=[]
@@ -45,13 +56,13 @@ def prepare_epub(source: Path, staging: Path):
             if item and ref.get('linear')!='no' and item.get('media-type') in ('application/xhtml+xml','text/html'):
                 ordered.append(resolve(opf,item['href'])[0])
         if not ordered:raise ValueError('EPUB has no readable spine')
-        docs={path:ET.fromstring(archive.read(path)) for path in ordered}
+        docs={path:parse_xml(archive.read(path)) for path in ordered}
         # Parse author navigation; preserve nesting, then order by the actual spine.
         toc=[]
         nav=next((x for x in manifest.values() if 'nav' in x.get('properties','').split()),None)
         if nav:
             nav_path=resolve(opf,nav['href'])[0]
-            tree=ET.fromstring(archive.read(nav_path))
+            tree=parse_xml(archive.read(nav_path))
             nav_node=next((x for x in tree.iter() if local(x.tag)=='nav' and any('toc' in v.split() for k,v in x.attrib.items() if local(k)=='type')),None)
             if nav_node is not None:
                 def walk(node,depth=0):
@@ -75,7 +86,7 @@ def prepare_epub(source: Path, staging: Path):
                                 if href:toc.append((href,' '.join(''.join(label.itertext()).split()) if label is not None else 'Chapter',depth))
                             walk_ncx(child,depth+1)
                         else:walk_ncx(child,depth)
-                walk_ncx(ET.fromstring(archive.read(ncx_path)))
+                walk_ncx(parse_xml(archive.read(ncx_path)))
         sections={path:f'shelf-spine-{i}' for i,path in enumerate(ordered)}
         anchors={}
         ranks={}

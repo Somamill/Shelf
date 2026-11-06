@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import json
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'Sources/ShelfCore/Tools'))
-from epub_native import prepare_epub,resolve
+from epub_native import prepare_epub,resolve,parse_xml
 
 class NativeEpubTests(unittest.TestCase):
     def make(self,root,unsafe=False):
@@ -34,6 +34,10 @@ class NativeEpubTests(unittest.TestCase):
             self.assertIn('href="#shelf-spine-0--c"',text)
             self.assertIn('book/EPUB/img.jpg',text)
             self.assertEqual(source.read_bytes(),original)
+    def test_xhtml_named_entities_do_not_require_external_dtd_loading(self):
+        node=parse_xml(b'<p>A&nbsp;&amp;&mdash;B</p>')
+        self.assertEqual(node.text,'A\u00a0&\u2014B')
+
     def test_archive_traversal_is_rejected_before_extraction(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
