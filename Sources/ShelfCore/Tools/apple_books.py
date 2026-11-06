@@ -49,7 +49,7 @@ def core_date(value):
     try:
         number = float(value)
         # Core Data timestamps are seconds since 2001-01-01.
-        if 0 < number < 500_000_000:
+        if number > 0:
             number += 978307200
         if number > 0:
             return datetime.fromtimestamp(number, timezone.utc).astimezone().isoformat()
@@ -72,9 +72,9 @@ def read_database(path):
             return {"status": "unsupported_schema", "books": []}
 
         mapping = {
-            "title": "ZTITLE", "author": "ZAUTHOR", "progress": "ZREADINGPROGRESS",
+            "title": "ZTITLE", "language": "ZLANGUAGE", "author": "ZAUTHOR", "progress": "ZREADINGPROGRESS",
             "highWater": "ZHIGHWATERMARKPROGRESS", "duration": "ZDURATION",
-            "assetId": "ZASSETID", "guid": "ZPERMANENTID", "coverURL": "ZURL",
+            "assetId": "ZASSETID", "guid": "ZPERMANENTID", "coverURL": "ZCOVERURL",
             "kind": "ZKIND", "audioFlag": "ZISSTOREAUDIOBOOK", "finished": "ZISFINISHED",
             "lastOpened": "ZLASTOPENDATE", "lastEngaged": "ZLASTENGAGEDDATE",
             "hidden": "ZHIDDEN", "sample": "ZISSAMPLE", "supplemental": "ZISSUPPLEMENTAL",
@@ -104,7 +104,7 @@ def read_database(path):
             except (TypeError, ValueError, OverflowError):
                 duration = None
             books.append({
-                "title": clean(item.get("title")), "author": clean(item.get("author")) or "",
+                "title": clean(item.get("title")), "language": clean(item.get("language")) or "", "author": clean(item.get("author")) or "",
                 "mediaType": "audiobook" if is_audio else "book",
                 "progress": progress, "highWater": item.get("highWater"), "duration": duration,
                 "assetId": clean(item.get("assetId")), "guid": clean(item.get("guid")),

@@ -1,3 +1,13 @@
+## 0.2.6
+
+- Restore the Discover screen and its search and trending controls.
+- Resolve and cache audiobook artwork, including Apple Books catalog artwork; prefer actual cover images over book-file URLs.
+- Correct Apple Books reference-date timestamps and sort the unified shelf using real activity from all connected locations; extend the local Hardcover adapter to return reading-update timestamps.
+- Refresh Connections on entry, distinguish an unavailable server from an unlinked account, and keep legacy job logs out of the connection overview.
+- Keep highlights local and move optional Readwise import controls to Connections.
+- Open EPUBs directly in spine order without conversion, preserve author navigation, and add searchable native chapter contents.
+- Show the book before background highlight imports complete, and move the back button into the bottom reader bar.
+
 ## 0.2.5
 
 - Restore local sync service startup with Colima and add low-frequency recovery for unavailable containers.

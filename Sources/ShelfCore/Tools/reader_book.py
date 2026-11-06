@@ -14,6 +14,8 @@ import sys
 import tempfile
 import time
 import zipfile
+import xml.etree.ElementTree as ET
+from epub_native import prepare_epub
 from pathlib import Path
 
 from shelf_config import configured_path, configuration_section
@@ -26,7 +28,7 @@ CONVERTER = Path(TOOLS.get('calibreApp') or shutil.which('ebook-convert') or '/A
 STATE = configured_path('state', str(BOOKS_ROOT / 'state'))
 CACHE_ROOT = STATE / 'dashboard-reader-cache'
 ALIASES = STATE / 'kosync-calibre-aliases.json'
-READER_CACHE_VERSION = 2
+READER_CACHE_VERSION = 4
 
 
 def locate_html(root: Path) -> Path | None:
@@ -71,35 +73,34 @@ def prepare_reader(source: Path, document: str) -> tuple[Path, Path, bool]:
             except (OSError, ValueError, TypeError):
                 pass
 
-        if not CONVERTER.is_file():
-            raise FileNotFoundError('Calibre or its ebook converter is unavailable.')
         staging = Path(tempfile.mkdtemp(prefix=f'.{key}.', dir=CACHE_ROOT))
         try:
-            archive = staging / 'book.htmlz'
-            result = subprocess.run(
-                [str(CONVERTER), str(source), str(archive)],
-                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
-            )
-            if result.returncode != 0 or not archive.is_file():
-                detail = (result.stderr or result.stdout).strip().splitlines()[-1:]
-                message = 'Calibre could not prepare this book for reading.'
-                if detail:
-                    message += f' {detail[0][:180]}'
-                raise RuntimeError(message)
-
-            extracted = staging / 'content'
-            extracted.mkdir()
-            with zipfile.ZipFile(archive) as bundle:
-                root = extracted.resolve()
-                for entry in bundle.infolist():
-                    target = (extracted / entry.filename).resolve()
-                    if not target.is_relative_to(root):
-                        raise ValueError('The converted book contains an unsafe path.')
-                    bundle.extract(entry, extracted)
-            archive.unlink(missing_ok=True)
-            html = locate_html(staging)
+            html = None
+            if source.suffix.lower() in ('.epub','.kepub'):
+                try:
+                    html = prepare_epub(source, staging)
+                except (ET.ParseError, KeyError, StopIteration):
+                    shutil.rmtree(staging/'content',ignore_errors=True)
             if html is None:
-                raise RuntimeError('Calibre produced no readable HTML for this book.')
+                if not CONVERTER.is_file():
+                    raise FileNotFoundError('Calibre or its ebook converter is unavailable.')
+                archive = staging / 'book.htmlz'
+                result = subprocess.run([str(CONVERTER), str(source), str(archive)],
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+                if result.returncode != 0 or not archive.is_file():
+                    raise RuntimeError('Calibre could not prepare this book for reading.')
+                extracted = staging / 'content'
+                extracted.mkdir()
+                with zipfile.ZipFile(archive) as bundle:
+                    root = extracted.resolve()
+                    for entry in bundle.infolist():
+                        if not (extracted/entry.filename).resolve().is_relative_to(root):
+                            raise ValueError('The converted book contains an unsafe path.')
+                        bundle.extract(entry,extracted)
+                archive.unlink(missing_ok=True)
+                html=locate_html(staging)
+                if html is None:
+                    raise RuntimeError('Calibre produced no readable HTML for this book.')
             (staging / '.reader-cache.json').write_text(
                 json.dumps({'key': key, 'sourceSize': stat.st_size,
                             'sourceModifiedNs': stat.st_mtime_ns}),
@@ -201,6 +202,7 @@ def main() -> None:
         'workDir': str(reader_directory),
         'persistentCache': True,
         'cacheHit': cache_hit,
+        'chapters': json.loads((reader_directory/'chapters.json').read_text()) if (reader_directory/'chapters.json').is_file() else [],
     }, ensure_ascii=False))
 
 

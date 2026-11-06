@@ -42,6 +42,8 @@ targets:
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/shelf_book_actions.py
         buildPhase: resources
+      - path: Sources/ShelfCore/Tools/epub_native.py
+        buildPhase: resources
       - path: Sources/ShelfCore/Tools/reader_book.py
         buildPhase: resources
       - path: Sources/ShelfCore/Tools/kosync_calibre_bridge.py
@@ -89,8 +91,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.shelf.dashboard
         PRODUCT_NAME: Shelf
-        MARKETING_VERSION: 0.2.5
-        CURRENT_PROJECT_VERSION: 49
+        MARKETING_VERSION: 0.2.6
+        CURRENT_PROJECT_VERSION: 50
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
